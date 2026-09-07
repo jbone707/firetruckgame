@@ -82,9 +82,18 @@ const SCHEMA_VERSION: int = 3
 ## over. Everything inside a block is solid, sidewalk and yard and lot alike:
 ## the only drivable surface on the map is road.
 ##
-## May be empty (schema version 3). Rectangles can only describe the land
-## between axis-aligned roads, so an imported map leaves this empty and
-## MapBuilder derives the block faces from the road network instead.
+## NOTHING READS THIS ANY MORE (Milestone 5 Part 1). MapBuilder derives the
+## land between the roads on EVERY map by cutting the road network out of the
+## map rectangle, because rectangles cannot describe the land between roads that
+## are not axis-aligned, and keeping a second path for the maps where they can
+## would have meant the fictional map was never proving anything about the real
+## one. The physics runner checks that the derived fence lands exactly where
+## these rectangles used to put it, which is the last thing they are good for.
+##
+## The field is kept rather than removed so this is one decision rather than
+## two: dropping it means a schema version 4, a regenerated neighbourhood.tres
+## and a migration for a resource nobody has a stale copy of. It is dead data,
+## it is named as dead data here, and removing it is James's call.
 @export var blocks: Array[Dictionary] = []
 
 ## Each entry: {id: String, position: Vector2, source: String, osm_id: String}.

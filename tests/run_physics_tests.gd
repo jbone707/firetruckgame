@@ -16,6 +16,11 @@ extends SceneTree
 
 const PHYSICS_FPS: int = 60
 
+## The imported map. Several checks run twice, once on each map, because the
+## fictional one cannot answer anything about angled roads and the imported one
+## is the reason the geometry was rewritten.
+const WINDSOR_MAP: String = "res://resources/windsor_shadetree.tres"
+
 var _failures: Array[String] = []
 var _checks: int = 0
 
@@ -34,6 +39,8 @@ func _run() -> void:
 	await _check_the_call_arrow_points_at_the_fire_from_any_heading()
 	await _check_the_call_arrow_hides_once_the_fire_is_on_screen()
 	await _check_an_empty_lot_stops_the_truck()
+	await _check_a_windsor_road_is_fenced_at_both_sides()
+	await _check_a_whole_shift_pays_out_on_the_windsor_map()
 	await _check_every_approach_to_a_hydrant_hooks_up()
 	await _check_the_narrowest_road_the_truck_can_turn_in()
 
@@ -63,12 +70,56 @@ func _check(condition: bool, message: String) -> void:
 ## injected here with zeros, since nothing is held down in a headless run. That
 ## is correct for the game and simply has to be switched off to drive the truck
 ## from a test.
-func _make_world() -> Array:
+func _make_world(map_path: String = "") -> Array:
 	var main: Node = load("res://scenes/Main.tscn").instantiate()
 	root.add_child(main)
 	await physics_frame
 	main.set_physics_process(false)
+	if map_path != "":
+		main.load_map(map_path)
+		await physics_frame
 	return [main, main.get_node("Truck")]
+
+
+## How far along a ray the truck leaves the asphalt, and how far along it the
+## fence stands, both read off the geometry MapBuilder actually built rather
+## than off any map's constants.
+##
+## Sampled rather than solved: the regions are arbitrary polygons at arbitrary
+## angles, one step is a unit, and a unit is a fortieth of the truck's width.
+func _crossings_along(
+	regions: Array, from: Vector2, direction: Vector2, reach: float
+) -> Array[float]:
+	var found: Array[float] = []
+	for region in regions:
+		var crossing: float = INF
+		var travelled: float = 0.0
+		while travelled <= reach:
+			var point: Vector2 = from + direction * travelled
+			for piece in region:
+				if Geometry2D.is_point_in_polygon(point, piece):
+					crossing = travelled
+					break
+			if crossing < INF:
+				break
+			travelled += 1.0
+		found.append(crossing)
+	return found
+
+
+## Four seconds of throttle from a standstill, reporting how far the nose got.
+func _drive_at(truck: Node, from: Vector2, heading: float) -> float:
+	truck.global_position = from
+	truck.rotation = heading
+	truck.velocity = Vector2.ZERO
+	var direction: Vector2 = Vector2.RIGHT.rotated(heading)
+
+	var deepest: float = -INF
+	for _frame in range(4 * PHYSICS_FPS):
+		truck.set_drive_intent(1.0, 0.0, false)
+		await physics_frame
+		deepest = maxf(deepest, (truck.global_position - from).dot(direction))
+	return deepest + truck.get_collision_half_extents().x
 
 
 func _check_truck_reaches_top_speed() -> void:
@@ -450,48 +501,54 @@ func _screen_centre_world(main: Node) -> Vector2:
 ## The station sits on Elm Avenue facing south, with block blk_00 immediately to
 ## its east; the truck is aimed straight at the gap between that block's north
 ## and south rows of houses, which is the emptiest ground on the map.
+## The fictional map, driven straight off Elm Avenue into the lot beside the
+## station. This is the check that says the rewrite changed nothing it was not
+## meant to change (Milestone 5 Part 1).
+##
+## The old MapBuilder read the fence off MapDefinition.blocks, a hand-typed
+## rectangle whose west edge sits at x 540 with the fence 34 further in at 574.
+## Nothing reads those rectangles any more: the fence is now derived from the
+## road network by cutting the roads and their sidewalks out of the map. So the
+## number is asserted twice over. The derived geometry has to put the fence at
+## the same 574 the hand-built rectangle did, and the truck has to be stopped
+## there. Either half failing on its own would be a real defect that a check
+## comparing the truck only against the derived answer would happily miss.
 func _check_an_empty_lot_stops_the_truck() -> void:
 	var world: Array = await _make_world()
 	var main: Node = world[0]
 	var truck: Node = world[1]
 
-	var definition: MapDefinition = main._map_definition
-	var lot: Rect2 = Rect2()
-	for block in definition.blocks:
-		if String(block["id"]) == "blk_00":
-			lot = block["rect"]
-	_check(lot.size.x > 0.0, "the map has a block blk_00 to drive at")
-	if lot.size.x <= 0.0:
-		main.queue_free()
-		await physics_frame
-		return
+	const HAND_BUILT_FENCE_X: float = 574.0
+	var start: Vector2 = main.get_station_spawn_position()
+	var builder: Node = main._map_builder
 
-	truck.global_position = main.get_station_spawn_position()
-	truck.rotation = 0.0  # due east, straight at the block
-	truck.velocity = Vector2.ZERO
-	var start_x: float = truck.global_position.x
-
-	var deepest_x: float = -INF
-	for _frame in range(4 * PHYSICS_FPS):
-		truck.set_drive_intent(1.0, 0.0, false)
-		await physics_frame
-		deepest_x = maxf(deepest_x, truck.global_position.x)
-
-	# Measured at the bumper, not the centre: the truck is 90 long and pointing
-	# due east, so its nose is 45 ahead of its own position.
-	var deepest_nose: float = deepest_x + truck.get_collision_half_extents().x
-	var kerb: float = lot.position.x
-	var fence: float = kerb + MapBuilder.SIDEWALK_WIDTH
+	# Due east off Elm Avenue, straight at the lot.
+	var crossings: Array[float] = _crossings_along(
+		[builder.get_kerb_region(), builder.get_lot_region()], start, Vector2.RIGHT, 600.0
+	)
+	var kerb: float = start.x + crossings[0]
+	var fence: float = start.x + crossings[1]
 
 	_check(
-		deepest_x > start_x + 20.0,
-		"the truck actually set off toward the lot (reached x %.1f from %.1f)"
-			% [deepest_x, start_x]
+		is_equal_approx(fence, HAND_BUILT_FENCE_X),
+		"the fence derived from the road network stands where the hand-built block"
+			+ " rectangle put it (derived %.1f, hand-built %.1f)" % [fence, HAND_BUILT_FENCE_X]
+	)
+	_check(
+		fence > kerb,
+		"with the drivable sidewalk between the kerb and it (kerb %.1f, fence %.1f)"
+			% [kerb, fence]
 	)
 
+	var deepest_nose: float = start.x + await _drive_at(truck, start, 0.0)
+
+	_check(
+		deepest_nose > start.x + 20.0,
+		"the truck actually set off toward the lot (nose reached x %.1f from %.1f)"
+			% [deepest_nose, start.x]
+	)
 	# Since sidewalks became drivable the kerb is no longer where this stops.
-	# Mounting it is allowed and free; the garden fence 34 units further in is
-	# the edge that holds.
+	# Mounting it is allowed and free; the fence 34 units further in holds.
 	_check(
 		deepest_nose > kerb,
 		"the truck can mount the kerb onto the sidewalk (nose reached %.1f, kerb at %.1f)"
@@ -499,8 +556,151 @@ func _check_an_empty_lot_stops_the_truck() -> void:
 	)
 	_check(
 		deepest_nose <= fence + 1.0,
-		"four seconds of throttle at an empty lot stops at the garden fence"
-			+ " (nose %.1f, fence at %.1f, centre %.1f)" % [deepest_nose, fence, deepest_x]
+		"four seconds of throttle at an empty lot stops at the fence"
+			+ " (nose %.1f, fence at %.1f)" % [deepest_nose, fence]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## The same claim on the Windsor import, where no road is axis-aligned and
+## nothing was hand-typed: driving straight off the road stops the truck at a
+## fence, having let it cross a kerb first.
+##
+## Driven perpendicular to a real road rather than along an axis, because the
+## whole question this answers is whether the fence is in the right place when
+## the road runs at 63 degrees to the world. The direction, the kerb and the
+## fence all come from the map's own geometry.
+func _check_a_windsor_road_is_fenced_at_both_sides() -> void:
+	var world: Array = await _make_world(WINDSOR_MAP)
+	var main: Node = world[0]
+	var truck: Node = world[1]
+
+	var builder: Node = main._map_builder
+	var graph: RoadGraph = builder.get_road_graph()
+
+	# The longest segment that is genuinely DIAGONAL, not simply the longest.
+	# The longest on this map runs within a third of a degree of due north, and
+	# driving off that would prove only what Elm Grove already proves. At least
+	# 15 degrees off both axes means the fence being found here is one the old
+	# axis-aligned builder could not have drawn.
+	const MIN_DIAGONAL: float = 0.26 # sine of about 15 degrees
+	var best: Dictionary = {}
+	var best_length: float = 0.0
+	for edge in graph.edges:
+		var from: Vector2 = graph.positions[int(edge["a"])]
+		var to: Vector2 = graph.positions[int(edge["b"])]
+		var direction: Vector2 = (to - from).normalized()
+		if absf(direction.x) < MIN_DIAGONAL or absf(direction.y) < MIN_DIAGONAL:
+			continue
+		if float(edge["length"]) > best_length:
+			best_length = float(edge["length"])
+			best = edge
+	_check(
+		best_length > 200.0,
+		"the Windsor map has a diagonal road segment worth driving off (%.0f units)" % best_length
+	)
+	if best.is_empty():
+		main.queue_free()
+		await physics_frame
+		return
+
+	var a: Vector2 = graph.positions[int(best["a"])]
+	var b: Vector2 = graph.positions[int(best["b"])]
+	var along: Vector2 = (b - a).normalized()
+	var start: Vector2 = (a + b) / 2.0
+	_check(
+		absf(along.x) >= MIN_DIAGONAL and absf(along.y) >= MIN_DIAGONAL,
+		"and that segment really does run at an angle, not along an axis"
+			+ " (%.0f degrees off east)" % rad_to_deg(absf(along.angle()))
+	)
+
+	for side in [1.0, -1.0]:
+		var out: Vector2 = Vector2(-along.y, along.x) * side
+		var crossings: Array[float] = _crossings_along(
+			[builder.get_kerb_region(), builder.get_lot_region()], start, out, 900.0
+		)
+		var kerb: float = crossings[0]
+		var fence: float = crossings[1]
+		if is_inf(fence):
+			_check(false, "there is a fence somewhere off the side of the road (side %.0f)" % side)
+			continue
+
+		_check(
+			fence > kerb and is_equal_approx(fence - kerb, MapBuilder.SIDEWALK_WIDTH),
+			("the sidewalk off this road is exactly one sidewalk wide on side %.0f"
+				+ " (kerb %.1f, fence %.1f, width %.1f)") % [side, kerb, fence, fence - kerb]
+		)
+
+		var reached: float = await _drive_at(truck, start, out.angle())
+		_check(
+			reached > kerb,
+			"the truck mounts the kerb on side %.0f (nose reached %.1f, kerb at %.1f)"
+				% [side, reached, kerb]
+		)
+		_check(
+			reached <= fence + 1.0,
+			("four seconds of throttle off the road stops at the fence, not the kerb,"
+				+ " on side %.0f (nose %.1f, fence %.1f)") % [side, reached, fence]
+		)
+
+	main.queue_free()
+	await physics_frame
+
+
+## A whole shift on the Windsor map, paying exactly what a whole shift pays.
+##
+## The fictional map's version of this check has run since the first build. It
+## proves the loop; it cannot prove the loop still closes on a map with 42 roads
+## that bend, 255 buildings and a spawn 9,200 units down the map, which is where
+## a candidate that cannot be reached, an incident with no building polygon or a
+## dispatch queue carried over from another map would actually show up.
+func _check_a_whole_shift_pays_out_on_the_windsor_map() -> void:
+	var world: Array = await _make_world(WINDSOR_MAP)
+	var main: Node = world[0]
+	var session: Node = main._session
+
+	_check(
+		main.get_map_definition().map_id == "windsor_shadetree_v1",
+		"the world really is built on the Windsor map (%s)" % main.get_map_definition().map_id
+	)
+
+	main._on_start_shift_pressed()
+	await physics_frame
+
+	_check(session.state == GameSession.State.PLAYING, "a shift starts on the Windsor map")
+	_check(
+		main._dispatch.active_incident != null,
+		"and the first Windsor call is dispatched with a live incident"
+	)
+	_check(
+		main._dispatch.active_incident != null
+			and main._dispatch.active_incident.get_escalation_remaining() > 0.0,
+		"with escalation margin still on the clock"
+	)
+
+	var expected: int = (
+		session.balance.credits_per_call * session.balance.calls_per_shift
+		+ session.balance.shift_completion_bonus
+	)
+	for _call in range(session.balance.calls_per_shift):
+		var incident: Node = main._dispatch.active_incident
+		if incident == null:
+			break
+		incident.apply_suppression(incident.max_health * 2.0)
+		main._dispatch._confirmation_remaining = 0.0
+		main._dispatch._dispatch_next()
+		await physics_frame
+
+	_check(
+		session.state == GameSession.State.RESULTS,
+		"clearing three Windsor calls ends the shift in results"
+	)
+	_check(
+		session.credits_earned_this_shift == expected,
+		"a whole Windsor shift pays exactly %d credits (actual %d)"
+			% [expected, session.credits_earned_this_shift]
 	)
 
 	main.queue_free()
@@ -784,10 +984,9 @@ static func _corner_map(width: float) -> MapDefinition:
 			"width": width, "source": "synthetic", "osm_id": "",
 		},
 	]
-	definition.blocks = [
-		{"id": "blk_nw", "rect": Rect2(0.0, 0.0, CORNER.x - half, CORNER.y - half), "yard_color": yard},
-		{"id": "blk_sw", "rect": Rect2(0.0, CORNER.y + half, CORNER.x - half, RIG_EXTENT - CORNER.y - half), "yard_color": yard},
-		{"id": "blk_n", "rect": Rect2(CORNER.x - half, 0.0, width, CORNER.y - half), "yard_color": yard},
-		{"id": "blk_e", "rect": Rect2(CORNER.x + half, 0.0, RIG_EXTENT - CORNER.x - half, RIG_EXTENT), "yard_color": yard},
-	]
+	# The rig used to list the four blocks around the corner by hand so the land
+	# outside the turn was solid. It no longer does, and the corner is still
+	# fenced: MapBuilder derives the land from the two roads above, which is the
+	# same code path both real maps go through. That is the point of the rig now
+	# as well as of the corner it tests.
 	return definition

@@ -600,26 +600,51 @@ func test_escalation_time_is_deterministic_and_never_below_the_base() -> void:
 	balance.free()
 
 
-## The allowance is priced along the grid, because every road on this map is
-## axis aligned and a driver cannot cut the corner. A straight line would
-## under-pay every call that needs two legs to reach.
-func test_travel_distance_is_measured_along_the_grid() -> void:
-	var straight: float = FireIncidentScript.travel_distance_between(
-		Vector2.ZERO, Vector2(300.0, 0.0)
-	)
-	assert_almost_eq(straight, 300.0, 0.0001, "a call straight down the road is its own length")
+## The allowance is priced along the ROADS, not along the grid and not as a
+## straight line. The grid rule it replaced was |dx| + |dy|, which happens to be
+## right on a map of axis-aligned streets and is not any journey a truck could
+## make on one that bends: it under-pays a call the roads only reach the long
+## way round and over-pays one reached by a diagonal street.
+##
+## Driven here against a deliberately un-gridlike shape: a diagonal road and a
+## dog-leg round two sides of it, so the grid answer, the straight line and the
+## route are three different numbers and only one of them is the drive.
+func test_travel_distance_is_measured_along_the_roads() -> void:
+	var definition := MapDefinition.new()
+	definition.world_bounds = Rect2(0.0, 0.0, 1000.0, 1000.0)
+	definition.roads = [
+		{
+			"id": "r_diagonal", "name": "Diagonal Street", "width": 100.0,
+			"source": "synthetic", "osm_id": "",
+			"points": PackedVector2Array([Vector2.ZERO, Vector2(300.0, 400.0)]),
+		},
+		{
+			"id": "r_dogleg", "name": "Dogleg Street", "width": 100.0,
+			"source": "synthetic", "osm_id": "",
+			"points": PackedVector2Array([
+				Vector2.ZERO, Vector2(0.0, 400.0), Vector2(300.0, 400.0),
+			]),
+		},
+	]
+	var graph: RoadGraph = RoadGraph.build(definition)
 
-	var cornered: float = FireIncidentScript.travel_distance_between(
-		Vector2.ZERO, Vector2(300.0, 400.0)
-	)
-	assert_almost_eq(cornered, 700.0, 0.0001, "a call round a corner is both legs, not the hypotenuse")
+	# The diagonal is 500 long by Pythagoras and the dog-leg is 700, so the
+	# shortest route is the diagonal, which is exactly what a driver would take.
+	var route: float = graph.route_length(Vector2.ZERO, Vector2(300.0, 400.0))
+	assert_almost_eq(route, 500.0, 0.5, "the route is the shorter of the two roads that join the ends")
 	assert_true(
-		cornered > Vector2.ZERO.distance_to(Vector2(300.0, 400.0)),
-		"which is longer than the straight line a truck cannot drive"
+		route < 700.0,
+		"which is less than the dog-leg the old grid rule would have charged (actual=%.1f)" % route
 	)
 
-	assert_eq(
-		FireIncidentScript.travel_distance_between(Vector2(900.0, 200.0), Vector2(400.0, 700.0)),
-		FireIncidentScript.travel_distance_between(Vector2(400.0, 700.0), Vector2(900.0, 200.0)),
+	assert_almost_eq(
+		graph.route_length(Vector2(300.0, 400.0), Vector2.ZERO),
+		route,
+		0.0001,
 		"the distance is the same in both directions"
 	)
+
+	# A point off the network is priced as the route plus the hop onto it, so a
+	# fire set back from the kerb is never cheaper than the road that reaches it.
+	var off_road: float = graph.route_length(Vector2(0.0, -60.0), Vector2(300.0, 400.0))
+	assert_almost_eq(off_road, route + 60.0, 0.5, "a point off the road pays the hop onto it too")

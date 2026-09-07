@@ -196,4 +196,13 @@ var escalation_travel_speed: float = 110.0 # invented default, not from handoff
 
 ## Ceiling on that allowance, seconds, so a pathological route on some future
 ## map cannot hand out an escalation limit measured in minutes.
-var escalation_travel_allowance_max: float = 90.0 # invented default, not from handoff
+##
+## Raised 90 to 150 in Milestone 5 Part 1. 90 was sized against a 4000 by 3000
+## map whose longest call was a 3345 unit drive, so it never bound. The Windsor
+## map is 12499 by 9500, and its longer routes run well past the old ceiling,
+## which meant the cap and not the drive decided the clock on those calls: every
+## distant call got the same number and the rule stopped being proportionate to
+## the journey, which is the whole point of it. 150 clears the longest route
+## either map actually produces, so the ceiling is once again a guard against a
+## future pathological map rather than something today's maps run into.
+var escalation_travel_allowance_max: float = 150.0 # invented default, not from handoff

@@ -35,16 +35,7 @@ func _ready() -> void:
 		% Engine.get_version_info()["string"]
 	)
 
-	_map_definition = load(MAP_RESOURCE_PATH)
-	_map_builder.build(_map_definition)
-	_build_hydrants()
-
-	_truck.global_position = get_station_spawn_position()
-	_truck.rotation = get_station_spawn_heading()
-
 	_camera.target = _truck
-	_camera.apply_world_bounds(_map_builder.get_world_bounds())
-	_camera.snap_to_target()
 	_camera.make_current()
 
 	_save = SaveManager.new()
@@ -52,7 +43,7 @@ func _ready() -> void:
 	if _save.last_load_diagnostic != "":
 		print("Fire Truck Game: %s" % _save.last_load_diagnostic)
 
-	_dispatch.setup(self, _map_builder.get_incident_candidates())
+	load_map(MAP_RESOURCE_PATH)
 	_session.setup(self, _dispatch, _truck, _water, _save)
 
 	_pause_menu.resume_requested.connect(_set_paused.bind(false))
@@ -80,12 +71,65 @@ func _ready() -> void:
 # Map access, used by GameSession and DispatchManager
 # ---------------------------------------------------------------------------
 
+## Swaps the whole neighbourhood: geometry, hydrants, camera limits, the truck's
+## place on it, and the pool of buildings that can catch fire.
+##
+## Everything the previous map left behind goes first. A fire still burning on a
+## building that no longer exists, or a dispatch queue full of candidate ids
+## from another map, is exactly the kind of thing that survives a switch and
+## then fails three calls later somewhere unrelated (handoff §9).
+func load_map(path: String) -> void:
+	var loaded: MapDefinition = load(path) as MapDefinition
+	if loaded == null:
+		push_error("%s is not a MapDefinition, keeping the map already loaded" % path)
+		return
+
+	_dispatch.reset()
+	clear_incidents()
+
+	_map_definition = loaded
+	_map_builder.build(_map_definition)
+	_build_hydrants()
+
+	_truck.global_position = get_station_spawn_position()
+	_truck.rotation = get_station_spawn_heading()
+	_truck.velocity = Vector2.ZERO
+
+	_camera.apply_world_bounds(_map_builder.get_world_bounds())
+	_camera.snap_to_target()
+
+	_dispatch.setup(self, _map_builder.get_incident_candidates())
+
+
+func get_map_definition() -> MapDefinition:
+	return _map_definition
+
+
 func get_station_spawn_position() -> Vector2:
 	return _map_builder.get_station_spawn_position()
 
 
 func get_station_spawn_heading() -> float:
 	return _map_builder.get_station_spawn_heading()
+
+
+## How far the truck has to drive to reach a point, along the roads. This is
+## what the escalation allowance is priced from, so a call the roads only reach
+## the long way round is paid for as the long way round.
+##
+## Falls back to the straight line if the network cannot reach the point at all.
+## MapValidator proves every candidate is on a reachable kerb on both shipped
+## maps, so that fallback is a guard rather than a path anything takes; a fire
+## with no route would otherwise be handed an infinite clock.
+func travel_distance_to(target: Vector2) -> float:
+	var graph: RoadGraph = _map_builder.get_road_graph()
+	if graph == null:
+		return _truck.global_position.distance_to(target)
+	var route: float = graph.route_length(_truck.global_position, target)
+	if is_inf(route):
+		push_warning("no road route to %s, pricing the call as the straight line" % target)
+		return _truck.global_position.distance_to(target)
+	return route
 
 
 func _build_hydrants() -> void:
@@ -112,9 +156,7 @@ func spawn_incident(candidate: Dictionary) -> FireIncident:
 	# Measured at dispatch, from wherever the truck actually is, so the clock a
 	# player is given matches the drive they are actually being asked to make.
 	# Main is the only node that knows both the truck and the candidate.
-	var travel: float = FireIncident.travel_distance_between(
-		_truck.global_position, Vector2(candidate["position"])
-	)
+	var travel: float = travel_distance_to(Vector2(candidate["position"]))
 
 	var incident: FireIncident = FireIncident.new()
 	incident.name = "Incident_%s" % String(candidate["id"])

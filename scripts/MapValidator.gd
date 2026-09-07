@@ -64,6 +64,7 @@ static func validate(definition: MapDefinition) -> Array[Dictionary]:
 		_check_roads_are_wide_enough_to_turn_in(definition),
 		_check_roads_only_overlap_at_junctions(definition, graph),
 		_check_buildings_are_off_the_road(definition, graph),
+		_check_the_land_between_the_roads_is_buildable(definition, graph),
 	]
 
 
@@ -280,6 +281,43 @@ static func _check_buildings_are_off_the_road(
 		problems.size(), "; ".join(listed),
 		"" if problems.size() <= 5 else ", and %d more" % (problems.size() - 5),
 	])
+
+
+## Rule 6. The land between the roads comes out as solid pieces that MapBuilder
+## can actually draw and collide.
+##
+## MapGeometry derives the yards, the fences and the lot collision by cutting
+## every road slab out of the map rectangle. That works because the road network
+## reaches the edge of the map, so each cut divides the land rather than
+## punching a hole in it. A network that stopped short of every edge would leave
+## the whole of it as one hole inside one rectangle, and a hole is something
+## Godot's CollisionPolygon2D cannot represent: the map would draw as an
+## unbroken field of grass with the roads painted on top and nothing solid
+## anywhere, which is a defect a player finds by driving through a house.
+##
+## So the assumption is checked rather than trusted, on the real derived
+## geometry rather than on a proxy for it.
+static func _check_the_land_between_the_roads_is_buildable(
+	definition: MapDefinition, graph: RoadGraph
+) -> Dictionary:
+	const RULE: String = "the land between the roads derives as solid, buildable pieces"
+	var lots: Array[PackedVector2Array] = MapGeometry.region_outside_roads(
+		graph, definition.world_bounds, MapBuilder.SIDEWALK_WIDTH
+	)
+	if lots.is_empty():
+		return _result(RULE, false, "the roads and their sidewalks cover the whole map")
+
+	var holes: int = 0
+	for piece in lots:
+		if Geometry2D.is_polygon_clockwise(piece):
+			holes += 1
+	if holes > 0:
+		return _result(RULE, false, (
+			"%d of %d piece(s) came out as holes, which means the road network does"
+			+ " not reach the edge of the map"
+		) % [holes, lots.size()])
+
+	return _result(RULE, true, "%d solid lot piece(s), no holes" % lots.size())
 
 
 static func _slab(graph: RoadGraph, edge: Dictionary) -> PackedVector2Array:

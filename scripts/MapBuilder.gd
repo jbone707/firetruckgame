@@ -5,44 +5,50 @@ class_name MapBuilder
 ## Roads, sidewalks, street name labels and hydrant/incident markers are purely
 ## visual and carry no collision shape at all. Buildings and the four map-edge
 ## walls get collision on physics layer 1 ("world_static"), mask 0, which both
-## stops the truck and blocks the water stream. A block's GARDEN, the part
-## behind the fence, gets collision on layer 5 ("world_lot"): solid to the truck,
+## stops the truck and blocks the water stream. The LOTS, the land behind the
+## fences, get collision on layer 5 ("world_lot"): solid to the truck,
 ## transparent to the stream. Clean retro-inspired shapes, built-in drawing
 ## (Polygon2D/Line2D) and built-in fonts only, no external assets.
 ##
-## Drivable: road, and the sidewalk band around every block. Not drivable: the
-## gardens inside the fences, and the houses on them. The kerb is a line the
-## player can cross; the fence is the one they cannot.
+## Drivable: road, and the sidewalk band around it. Not drivable: the land
+## behind the fences, and the houses on it. The kerb is a line the player can
+## cross; the fence is the one they cannot.
+##
+## Nothing here assumes a road is straight, axis-aligned or rectangular
+## (Milestone 5 Part 1). Every shape on the ground is derived by MapGeometry
+## from the road network, so a cul-de-sac, a bend and two streets meeting at 63
+## degrees are drawn and collided by the same code that draws a grid. The
+## MapDefinition.blocks rectangles are no longer read at all: they cannot
+## describe the land between roads that are not axis-aligned, and keeping a
+## second path for the maps where they can would mean the fictional map was
+## never proving anything about the real one.
 
-## Warm, near-black asphalt (Part 2). Every road, and every junction where two
-## roads cross, is filled with this exact colour and nothing else, which is
-## what makes the network read as one continuous surface: two overlapping
-## opaque fills of an identical colour cannot show a seam, whereas the old
-## per-road Line2D (translucent-looking at its round joints and caps) showed
-## one at every crossing and made junctions read as raised or sunken boxes.
+## Warm, near-black asphalt (Part 2). Every road slab, and every junction fill,
+## is filled with this exact colour and nothing else, which is what makes the
+## network read as one continuous surface: two overlapping opaque fills of an
+## identical colour cannot show a seam.
 const ASPHALT_COLOR: Color = Color(0.14, 0.13, 0.125)
 
-## Concrete band around every block. Kept clearly lighter than ASPHALT_COLOR
-## (it was already lighter than the old road grey; the gap is far bigger now)
-## so "road" and "sidewalk" are never a lighting judgement call.
+## Concrete band around every road. Kept clearly lighter than ASPHALT_COLOR so
+## "road" and "sidewalk" are never a lighting judgement call.
 const SIDEWALK_COLOR: Color = Color(0.74, 0.72, 0.67)
 
 ## The line where concrete meets asphalt, lighter again than the sidewalk
-## itself so the boundary a fire truck must not cross reads as a drawn edge
-## rather than a shade difference the player has to infer.
+## itself so the boundary reads as a drawn edge rather than a shade difference
+## the player has to infer.
 const KERB_COLOR: Color = Color(0.90, 0.87, 0.79)
 
 ## Dashed lane marking down the middle of every road. Muted pale yellow, kept
-## dimmer than KERB_COLOR so the two kinds of line do not compete for the same
-## "this is the important line" read.
+## dimmer than KERB_COLOR so the two kinds of line do not compete.
 const CENTERLINE_COLOR: Color = Color(0.82, 0.77, 0.52)
 
-## Width of the concrete band around the edge of every block, world units.
+## Width of the concrete band outside the kerb, world units. This is the one
+## number that turns the road region into the drivable region.
 const SIDEWALK_WIDTH: float = 34.0
 const KERB_WIDTH: float = 5.0
 const CENTERLINE_WIDTH: float = 6.0
 
-## The garden fence: where a block stops being drivable. Since sidewalks became
+## The garden fence: where the land stops being drivable. Since sidewalks became
 ## drivable this, and not the kerb, is the edge that stops the truck.
 const FENCE_WIDTH: float = 4.0
 const FENCE_COLOR: Color = Color(0.42, 0.36, 0.28, 0.95)
@@ -51,28 +57,26 @@ const FENCE_COLOR: Color = Color(0.42, 0.36, 0.28, 0.95)
 const DASH_LENGTH: float = 44.0
 const DASH_GAP: float = 32.0
 
-## The physics layer a block's garden sits on, behind its fence. It stops the
-## truck, exactly as a building does, but it is deliberately absent from
+## The physics layer the lots sit on, behind their fences. They stop the truck,
+## exactly as a building does, but they are deliberately absent from
 ## WaterSystem's stream mask, because a stream clears a fence and a front lawn
-## and does not clear a house. Without that split, filling the blocks in would
-## have made every fire on the map unreachable from the street it faces. That
-## decision stands; only the sidewalk came back out of it.
+## and does not clear a house. Without that split, filling the land in would
+## have made every fire unreachable from the street it faces.
 const LOT_LAYER: int = 0b10000  # layer 5, world_lot
 const ROOF_INSET_SCALE: float = 0.62
 const WALL_THICKNESS: float = 40.0
 const LABEL_COLOR: Color = Color(0.95, 0.95, 0.90)
 
 ## Draw order, bottom to top. Every drawn node sets exactly one of these.
-## Road markings sit directly on the asphalt below them; sidewalk and yard
-## are drawn above the road so any antialiased pixel on their shared edge
-## resolves to concrete, not tarmac; the kerb is drawn last of the ground
-## layers so it sits cleanly on top of that seam, which is the one edge in
-## the whole scene that is *supposed* to show, being the line between
-## drivable and not. The fence, one step above it, is where collision actually
-## begins now that the sidewalk is drivable.
-const Z_ROAD: int = 0
-const Z_ROAD_MARKING: int = 1
-const Z_SIDEWALK: int = 2
+##
+## The sidewalk is the whole drivable region, road included, and the asphalt is
+## drawn ON TOP of it rather than beside it. That is what removes the seam at
+## the kerb: there is no shared edge between two fills to alias along, only one
+## fill ending on another, with the kerb line drawn last over the join. The
+## yards sit above the sidewalk for the same reason on the far side.
+const Z_SIDEWALK: int = 0
+const Z_ROAD: int = 1
+const Z_ROAD_MARKING: int = 2
 const Z_YARD: int = 3
 const Z_KERB: int = 4
 const Z_FENCE: int = 5
@@ -82,6 +86,9 @@ const Z_LABEL: int = 8
 const Z_MARKER: int = 9  # reserved: nothing draws at this level today
 
 var _definition: MapDefinition = null
+var _graph: RoadGraph = null
+var _lot_region: Array[PackedVector2Array] = []
+var _kerb_region: Array[PackedVector2Array] = []
 
 
 func build(definition: MapDefinition) -> void:
@@ -90,12 +97,22 @@ func build(definition: MapDefinition) -> void:
 	for child in get_children():
 		child.queue_free()
 
+	_graph = RoadGraph.build(definition)
+
+	var bounds: Rect2 = definition.world_bounds
+	var slabs: Array[PackedVector2Array] = MapGeometry.road_slabs(_graph)
+	# The kerb region and the lot region are the same operation run twice, with
+	# and without the sidewalk, so the two lines can never disagree about where
+	# a road is.
+	_kerb_region = MapGeometry.region_outside_roads(_graph, bounds, 0.0)
+	_lot_region = MapGeometry.region_outside_roads(_graph, bounds, SIDEWALK_WIDTH)
+
 	var roads_root := Node2D.new()
 	roads_root.name = "Roads"
 	add_child(roads_root)
 
 	var blocks_root := Node2D.new()
-	blocks_root.name = "Blocks"
+	blocks_root.name = "Lots"
 	add_child(blocks_root)
 
 	var buildings_root := Node2D.new()
@@ -110,45 +127,21 @@ func build(definition: MapDefinition) -> void:
 	walls_root.name = "EdgeWalls"
 	add_child(walls_root)
 
-	# Every road in this map is one straight, axis-aligned span (see
-	# MapDefinition.create_fictional_neighbourhood), so it can be treated as a
-	# single rectangle rather than a polyline. That rectangle is computed once
-	# and reused for the asphalt fill, the junction search and the centreline
-	# gaps, so all three agree exactly on where each road is.
-	var road_rects: Array[Rect2] = []
-	for road in definition.roads:
-		road_rects.append(_road_rect(road["points"], road["width"]))
+	_build_ground(roads_root, slabs)
+	_build_centrelines(roads_root)
+	_build_road_labels(roads_root)
 
-	for i in range(definition.roads.size()):
-		_build_road_slab(roads_root, definition.roads[i], road_rects[i])
-
-	# A junction is just the overlap of two road rectangles. Filling that
-	# overlap with one more opaque ASPHALT_COLOR polygon, drawn after every
-	# road slab so it sits on top, is the "opaque intersection square drawn
-	# last" approach from the handoff: it guarantees the crossing is a single
-	# flat fill with no seam, without having to merge the road polygons.
-	var junctions: Array[Rect2] = _find_junctions(road_rects)
-	for junction in junctions:
-		_build_junction_slab(roads_root, junction)
-
-	for i in range(definition.roads.size()):
-		_build_road_markings(roads_root, definition.roads[i], road_rects[i], junctions)
-		_build_road_label(roads_root, definition.roads[i])
-
-	for block in definition.blocks:
-		_build_block(blocks_root, block)
+	_build_lots(blocks_root, bounds)
+	_build_kerbs(blocks_root, bounds)
 
 	for building in definition.buildings:
 		_build_building(buildings_root, building)
 
 	# Hydrants and incident candidates are not drawn here. Hydrant is a real node
 	# with its own interaction ring, and only the dispatched call is marked, by
-	# FireIncident. Drawing them here as well would put a second dot under every
-	# hydrant and mark buildings the player has not been sent to. The helpers
-	# that used to do it were kept for a map preview tool that never arrived and
-	# have been deleted; Markers below is the empty layer they would go back in.
+	# FireIncident. Markers above is the empty layer they would go back in.
 
-	_build_edge_walls(walls_root, definition.world_bounds)
+	_build_edge_walls(walls_root, bounds)
 
 
 func get_station_spawn_position() -> Vector2:
@@ -167,6 +160,13 @@ func get_world_bounds() -> Rect2:
 	if _definition == null:
 		return Rect2()
 	return _definition.world_bounds
+
+
+## The road network as a graph. Main prices a call's escalation allowance from
+## this, because a route along real roads is the only honest measure of how far
+## away a fire is once the roads stop being a grid.
+func get_road_graph() -> RoadGraph:
+	return _graph
 
 
 func get_hydrant_definitions() -> Array[Dictionary]:
@@ -190,234 +190,272 @@ func get_building_polygon(building_id: String) -> PackedVector2Array:
 	return PackedVector2Array()
 
 
+## The land behind the fences, as the polygons the fences are drawn from. Read
+## by the physics runner, which measures where the truck actually stops against
+## where this says the fence is.
+func get_lot_region() -> Array[PackedVector2Array]:
+	return _lot_region
+
+
+## The land the asphalt does not cover, as the polygons the kerbs are drawn
+## from. Read by the physics runner, which needs to know where the kerb is in
+## order to prove that the truck crossed it and was then stopped by something
+## further in.
+func get_kerb_region() -> Array[PackedVector2Array]:
+	return _kerb_region
+
+
 # ---------------------------------------------------------------------------
-# Road, sidewalk and label construction
+# The ground: concrete first, asphalt over it, dashes over that
 # ---------------------------------------------------------------------------
 
-## The axis-aligned rectangle a straight road occupies, kerb to kerb. Works
-## for any two-point road whose points share an x (a north-south avenue) or a
-## share a y (an east-west street), which is every road this map produces.
-func _road_rect(points: PackedVector2Array, width: float) -> Rect2:
-	var p0: Vector2 = points[0]
-	var p1: Vector2 = points[points.size() - 1]
-	var half_width: float = width / 2.0
-	if is_equal_approx(p0.x, p1.x):
-		var top: float = min(p0.y, p1.y)
-		return Rect2(p0.x - half_width, top, width, abs(p1.y - p0.y))
-	else:
-		var left: float = min(p0.x, p1.x)
-		return Rect2(left, p0.y - half_width, abs(p1.x - p0.x), width)
+## One concrete slab and one asphalt slab per road segment and per junction,
+## every one of them opaque and the same colour as its neighbours. Overlapping
+## identical opaque fills cannot show a seam, which is why the junctions are
+## covered by drawing another fill over them rather than by merging polygons:
+## the merge is only needed where a BOUNDARY has to be found, and that is done
+## once, by MapGeometry, for the kerb and the fence.
+func _build_ground(parent: Node2D, slabs: Array[PackedVector2Array]) -> void:
+	for index in range(slabs.size()):
+		for grown in Geometry2D.offset_polygon(
+			slabs[index], SIDEWALK_WIDTH, Geometry2D.JOIN_SQUARE
+		):
+			var concrete := Polygon2D.new()
+			concrete.name = "Sidewalk_%d" % index
+			concrete.polygon = grown
+			concrete.color = SIDEWALK_COLOR
+			concrete.z_index = Z_SIDEWALK
+			parent.add_child(concrete)
+
+	for index in range(slabs.size()):
+		var asphalt := Polygon2D.new()
+		asphalt.name = "Road_%d" % index
+		asphalt.polygon = slabs[index]
+		asphalt.color = ASPHALT_COLOR
+		asphalt.z_index = Z_ROAD
+		parent.add_child(asphalt)
 
 
-## Every place two road rectangles overlap: the sixteen real junctions. Found
-## purely from geometry, not from the street/avenue grid constants, so this
-## keeps working unchanged if the road layout ever does.
-func _find_junctions(road_rects: Array[Rect2]) -> Array[Rect2]:
-	var junctions: Array[Rect2] = []
-	for i in range(road_rects.size()):
-		for j in range(i + 1, road_rects.size()):
-			if not road_rects[i].intersects(road_rects[j]):
+## The dashed centreline of every road, following the road's own bends and
+## broken wherever it passes through a junction. A junction is filled solid
+## precisely so it must never carry a lane marking across it.
+func _build_centrelines(parent: Node2D) -> void:
+	var period: float = DASH_LENGTH + DASH_GAP
+	for road_index in range(_definition.roads.size()):
+		var road: Dictionary = _definition.roads[road_index]
+		var points: PackedVector2Array = road["points"]
+		var blockers: Array[Dictionary] = _junctions_on_road(road_index)
+
+		var dash_index: int = 0
+		var phase: float = 0.0
+		for i in range(points.size() - 1):
+			var a: Vector2 = points[i]
+			var b: Vector2 = points[i + 1]
+			var length: float = a.distance_to(b)
+			if length <= 0.0:
 				continue
-			var overlap: Rect2 = road_rects[i].intersection(road_rects[j])
-			if overlap.size.x > 0.0 and overlap.size.y > 0.0:
-				junctions.append(overlap)
-	return junctions
+			var direction: Vector2 = (b - a) / length
+
+			var travelled: float = 0.0
+			while travelled < length:
+				var cycle: float = fposmod(phase + travelled, period)
+				if cycle >= DASH_LENGTH:
+					travelled = minf(travelled + (period - cycle), length)
+					continue
+				var dash_end: float = minf(travelled + (DASH_LENGTH - cycle), length)
+				var from: Vector2 = a + direction * travelled
+				var to: Vector2 = a + direction * dash_end
+				if dash_end - travelled > 1.0 and not _blocked(from, to, blockers):
+					var dash := Polygon2D.new()
+					dash.name = "Centreline_%s_%d" % [String(road["id"]), dash_index]
+					dash.polygon = MapGeometry.oriented_slab(from, to, CENTERLINE_WIDTH)
+					dash.color = CENTERLINE_COLOR
+					dash.z_index = Z_ROAD_MARKING
+					parent.add_child(dash)
+					dash_index += 1
+				travelled = dash_end
+			phase = fposmod(phase + length, period)
 
 
-func _build_road_slab(parent: Node2D, road: Dictionary, rect: Rect2) -> void:
-	var slab := Polygon2D.new()
-	slab.name = "Road_%s" % String(road["id"])
-	slab.polygon = _rect_polygon(rect)
-	slab.color = ASPHALT_COLOR
-	slab.z_index = Z_ROAD
-	parent.add_child(slab)
-
-
-## Drawn after every _build_road_slab call, so within Roads (same parent, same
-## z-index) it is later in child order and therefore on top: the fill that
-## actually seals each junction into one continuous surface.
-func _build_junction_slab(parent: Node2D, junction: Rect2) -> void:
-	var slab := Polygon2D.new()
-	slab.name = "Junction_%d_%d" % [int(junction.position.x), int(junction.position.y)]
-	slab.polygon = _rect_polygon(junction)
-	slab.color = ASPHALT_COLOR
-	slab.z_index = Z_ROAD
-	parent.add_child(slab)
-
-
-## A rectangle running from a to b, width wide, oriented along a-b. Used for
-## the dashed centreline; road slabs use _road_rect/_rect_polygon directly
-## since every road is axis-aligned, but this stays general along the road's
-## own direction so a dash never needs special-casing per axis.
-func _oriented_rect_polygon(a: Vector2, b: Vector2, width: float) -> PackedVector2Array:
-	var direction: Vector2 = (b - a).normalized()
-	var perpendicular: Vector2 = Vector2(-direction.y, direction.x) * (width / 2.0)
-	return PackedVector2Array([
-		a + perpendicular, b + perpendicular, b - perpendicular, a - perpendicular,
-	])
-
-
-## The dashed centreline for one road, broken wherever the road crosses
-## another one. A junction is filled solid (item 2) precisely so it must never
-## carry a lane marking on top; a dash running through it would be the same
-## "line crosses a box" bug the kerb fix is also avoiding, in yellow instead
-## of concrete.
-func _build_road_markings(parent: Node2D, road: Dictionary, rect: Rect2, junctions: Array[Rect2]) -> void:
-	var points: PackedVector2Array = road["points"]
-	var p0: Vector2 = points[0]
-	var p1: Vector2 = points[points.size() - 1]
-	var vertical: bool = is_equal_approx(p0.x, p1.x)
-	var axis_start: float = min(p0.y, p1.y) if vertical else min(p0.x, p1.x)
-	var length: float = rect.size.y if vertical else rect.size.x
-
-	# Every junction this road passes through, as a [start, end] gap along the
-	# road's own axis, relative to axis_start.
-	var gaps: Array = []
-	for junction in junctions:
-		if not rect.intersects(junction):
+## Every real crossing this road passes through, as a centre and the radius the
+## junction fill reaches. Only nodes where three or more segments meet count: a
+## node with two is a bend in one road, and breaking the dash at every bend
+## would leave an imported road dashed almost nowhere.
+func _junctions_on_road(road_index: int) -> Array[Dictionary]:
+	var radii: Dictionary = {}
+	for edge in _graph.edges:
+		if int(edge["road_index"]) != road_index:
 			continue
-		var overlap: Rect2 = rect.intersection(junction)
-		if overlap.size.x <= 0.0 or overlap.size.y <= 0.0:
+		for key in ["a", "b"]:
+			var node: int = int(edge[key])
+			if _graph.incident_edges.get(node, []).size() < 3:
+				continue
+			var radius: float = 0.0
+			for incident_index in _graph.incident_edges[node]:
+				radius = maxf(radius, float(_graph.edges[int(incident_index)]["width"]) / 2.0)
+			radii[node] = radius
+
+	var found: Array[Dictionary] = []
+	for node in radii:
+		found.append({"centre": _graph.positions[int(node)], "radius": float(radii[node])})
+	return found
+
+
+static func _blocked(from: Vector2, to: Vector2, blockers: Array[Dictionary]) -> bool:
+	for blocker in blockers:
+		var centre: Vector2 = blocker["centre"]
+		var radius: float = blocker["radius"]
+		if Geometry2D.get_closest_point_to_segment(centre, from, to).distance_to(centre) <= radius:
+			return true
+	return false
+
+
+## One label per street NAME, not per road. An imported street arrives as
+## several ways split at its junctions, and labelling each of them would print
+## "Shadetree Drive" five times down one street. The longest piece carries it.
+func _build_road_labels(parent: Node2D) -> void:
+	var longest: Dictionary = {}
+	for road in _definition.roads:
+		var road_name: String = String(road.get("name", "")).strip_edges()
+		if road_name == "":
 			continue
-		var lo: float = (overlap.position.y if vertical else overlap.position.x) - axis_start
-		var hi: float = lo + (overlap.size.y if vertical else overlap.size.x)
-		gaps.append([lo, hi])
-	gaps.sort_custom(func(a, b): return a[0] < b[0])
+		var length: float = _polyline_length(road["points"])
+		if not longest.has(road_name) or length > float(longest[road_name]["length"]):
+			longest[road_name] = {"length": length, "road": road}
 
-	var runs: Array = []
-	var cursor: float = 0.0
-	for gap in gaps:
-		if gap[0] > cursor:
-			runs.append([cursor, gap[0]])
-		cursor = max(cursor, gap[1])
-	if cursor < length:
-		runs.append([cursor, length])
+	for road_name in longest:
+		var road: Dictionary = longest[road_name]["road"]
+		var placement: Dictionary = _polyline_midpoint(road["points"])
+		var direction: Vector2 = placement["direction"]
+		var perpendicular := Vector2(-direction.y, direction.x)
 
-	var dash_index: int = 0
-	for run in runs:
-		var t: float = run[0]
-		while t < run[1]:
-			var dash_end: float = min(t + DASH_LENGTH, run[1])
-			var a: Vector2 = Vector2(p0.x, axis_start + t) if vertical else Vector2(axis_start + t, p0.y)
-			var b: Vector2 = Vector2(p0.x, axis_start + dash_end) if vertical else Vector2(axis_start + dash_end, p0.y)
-			var dash := Polygon2D.new()
-			dash.name = "Centreline_%s_%d" % [String(road["id"]), dash_index]
-			dash.polygon = _oriented_rect_polygon(a, b, CENTERLINE_WIDTH)
-			dash.color = CENTERLINE_COLOR
-			dash.z_index = Z_ROAD_MARKING
-			parent.add_child(dash)
-			dash_index += 1
-			t += DASH_LENGTH + DASH_GAP
+		var label := Label.new()
+		label.name = "Label_%s" % String(road["id"])
+		label.text = String(road_name)
+		label.add_theme_color_override("font_color", LABEL_COLOR)
+		label.add_theme_font_size_override("font_size", 14)
+		label.z_index = Z_LABEL
+		var offset: float = float(road["width"]) / 2.0 + SIDEWALK_WIDTH + 8.0
+		label.position = (
+			Vector2(placement["position"]) + perpendicular * offset
+			- Vector2(String(road_name).length() * 3.5, 8.0)
+		)
+		parent.add_child(label)
 
 
-func _build_road_label(parent: Node2D, road: Dictionary) -> void:
-	var points: PackedVector2Array = road["points"]
-	var width: float = road["width"]
-	var direction: Vector2 = (points[points.size() - 1] - points[0]).normalized()
-	var perpendicular := Vector2(-direction.y, direction.x)
+static func _polyline_length(points: PackedVector2Array) -> float:
+	var total: float = 0.0
+	for i in range(points.size() - 1):
+		total += points[i].distance_to(points[i + 1])
+	return total
 
-	var label := Label.new()
-	label.name = "Label_%s" % String(road["id"])
-	label.text = String(road["name"])
-	label.add_theme_color_override("font_color", LABEL_COLOR)
-	label.add_theme_font_size_override("font_size", 14)
-	label.z_index = Z_LABEL
-	var midpoint: Vector2 = (points[0] + points[points.size() - 1]) / 2.0
-	var label_offset: float = width / 2.0 + SIDEWALK_WIDTH + 8.0
-	label.position = midpoint + perpendicular * label_offset - Vector2(String(road["name"]).length() * 3.5, 8.0)
-	parent.add_child(label)
+
+## The point half way ALONG a road, and the direction of the road there. The
+## straight-line midpoint of the two ends would sit off the road entirely on
+## anything that bends.
+static func _polyline_midpoint(points: PackedVector2Array) -> Dictionary:
+	var half: float = _polyline_length(points) / 2.0
+	var travelled: float = 0.0
+	for i in range(points.size() - 1):
+		var a: Vector2 = points[i]
+		var b: Vector2 = points[i + 1]
+		var length: float = a.distance_to(b)
+		if length <= 0.0:
+			continue
+		if travelled + length >= half:
+			var into: float = half - travelled
+			return {
+				"position": a + (b - a).normalized() * into,
+				"direction": (b - a).normalized(),
+			}
+		travelled += length
+	var last: Vector2 = points[points.size() - 1]
+	var first: Vector2 = points[0]
+	return {
+		"position": (first + last) / 2.0,
+		"direction": (last - first).normalized() if last != first else Vector2.RIGHT,
+	}
 
 
 # ---------------------------------------------------------------------------
-# Blocks: the land between the roads
+# The lots: the land between the roads
 # ---------------------------------------------------------------------------
 
-## One block: a concrete sidewalk band around the outside, a garden fill inside
-## it, a kerb line where the concrete meets the road, and one collision body
-## covering the whole thing on LOT_LAYER.
+## Every piece of land the roads and their sidewalks do not cover: drawn as a
+## yard, outlined by the fence that stops the truck, and made solid on
+## LOT_LAYER.
 ##
-## Filling the blocks in is the point of this part. Before it, the gaps between
-## buildings were open ground and the truck could drive between the houses and
-## across the back gardens, which is what made the streets read as decoration
-## rather than as the road network.
-func _build_block(parent: Node2D, block: Dictionary) -> void:
-	var rect: Rect2 = block["rect"]
-	var block_id: String = String(block["id"])
+## The collision region has the buildings cut out of it, because a house is
+## already solid on layer 1 and covering it a second time on layer 5 would say
+## the same thing twice. Where a house stands clear of the fence line, which is
+## every house on both of today's maps, that cut leaves the footprint as a hole
+## rather than as part of the outline, and a hole is dropped: the house's own
+## body is what stops the truck there. The yards and fences are drawn from the
+## region WITHOUT that cut, so a fence runs along the street and not around
+## every house on it.
+func _build_lots(parent: Node2D, bounds: Rect2) -> void:
+	for index in range(_lot_region.size()):
+		var piece: PackedVector2Array = _lot_region[index]
 
-	var sidewalk := Polygon2D.new()
-	sidewalk.name = "Sidewalk_%s" % block_id
-	sidewalk.polygon = _rect_polygon(rect)
-	sidewalk.color = SIDEWALK_COLOR
-	sidewalk.z_index = Z_SIDEWALK
-	parent.add_child(sidewalk)
-
-	var yard_rect: Rect2 = rect.grow(-SIDEWALK_WIDTH)
-	if yard_rect.size.x > 0.0 and yard_rect.size.y > 0.0:
 		var yard := Polygon2D.new()
-		yard.name = "Yard_%s" % block_id
-		yard.polygon = _rect_polygon(yard_rect)
-		yard.color = block["yard_color"]
+		yard.name = "Yard_%d" % index
+		yard.polygon = piece
+		yard.color = _yard_color(MapGeometry.polygon_centroid(piece))
 		yard.z_index = Z_YARD
 		parent.add_child(yard)
 
-	# The kerb: a light line right on the block's edge, so the boundary between
-	# what can be driven on and what cannot is a visible edge rather than a
-	# change of colour the player has to infer. A block's rect is exactly the
-	# land between roads (blocks run kerb to kerb, handoff on this file's own
-	# comment above), so this line sits exactly on every road edge and, because
-	# a block never extends into a junction, it is never drawn across one: the
-	# same "break it at intersections" rule item 3 asks for, satisfied by the
-	# block geometry itself rather than by special-casing the corners.
-	var kerb := Line2D.new()
-	kerb.name = "Kerb_%s" % block_id
-	kerb.points = _rect_polygon(rect)
-	kerb.closed = true
-	kerb.width = KERB_WIDTH
-	kerb.default_color = KERB_COLOR
-	kerb.z_index = Z_KERB
-	parent.add_child(kerb)
+		for run in MapGeometry.boundary_runs(piece, bounds):
+			var fence := Line2D.new()
+			fence.name = "Fence_%d_%d" % [index, parent.get_child_count()]
+			fence.points = run
+			fence.width = FENCE_WIDTH
+			fence.default_color = FENCE_COLOR
+			fence.z_index = Z_FENCE
+			parent.add_child(fence)
 
-	# Collision stops at the garden fence, not at the kerb. The sidewalk band is
-	# drivable ground: mounting the kerb to get round something, or to pull up
-	# level with a hydrant, is allowed and costs nothing in this build. What is
-	# still solid is the garden behind the fence, and the houses on it.
-	if yard_rect.size.x <= 0.0 or yard_rect.size.y <= 0.0:
-		return
+	var footprints: Array[PackedVector2Array] = []
+	for building in _definition.buildings:
+		footprints.append(building["polygon"])
 
-	_build_fence(parent, block_id, yard_rect)
+	var solid: Array[PackedVector2Array] = MapGeometry.subtract_polygons(
+		_lot_region, footprints
+	)
 
 	var body := StaticBody2D.new()
-	body.name = "Lot_%s" % block_id
+	body.name = "Lots"
 	body.collision_layer = LOT_LAYER
 	body.collision_mask = 0
-	var shape := CollisionPolygon2D.new()
-	shape.polygon = _rect_polygon(yard_rect)
-	body.add_child(shape)
+	for piece in solid:
+		if Geometry2D.is_polygon_clockwise(piece):
+			continue
+		var shape := CollisionPolygon2D.new()
+		shape.polygon = piece
+		body.add_child(shape)
 	parent.add_child(body)
 
 
-## The line the truck will actually be stopped at, drawn so it is a line the
-## player can see rather than one they discover. Since Part 2 of this milestone
-## the kerb is no longer where collision begins, so the kerb alone would be a
-## misleading edge to leave as the only one.
-func _build_fence(parent: Node2D, block_id: String, yard_rect: Rect2) -> void:
-	var fence := Line2D.new()
-	fence.name = "Fence_%s" % block_id
-	fence.points = _rect_polygon(yard_rect)
-	fence.closed = true
-	fence.width = FENCE_WIDTH
-	fence.default_color = FENCE_COLOR
-	fence.z_index = Z_FENCE
-	parent.add_child(fence)
+## The kerb, drawn from the road region rather than from the lot region, so it
+## sits exactly on the asphalt edge at every angle. Both lines skip the map's
+## own boundary: there is no kerb at the edge of the world, there is a wall.
+func _build_kerbs(parent: Node2D, bounds: Rect2) -> void:
+	for index in range(_kerb_region.size()):
+		for run in MapGeometry.boundary_runs(_kerb_region[index], bounds):
+			var kerb := Line2D.new()
+			kerb.name = "Kerb_%d_%d" % [index, parent.get_child_count()]
+			kerb.points = run
+			kerb.width = KERB_WIDTH
+			kerb.default_color = KERB_COLOR
+			kerb.z_index = Z_KERB
+			parent.add_child(kerb)
 
 
-func _rect_polygon(rect: Rect2) -> PackedVector2Array:
-	return PackedVector2Array([
-		rect.position,
-		Vector2(rect.position.x + rect.size.x, rect.position.y),
-		rect.position + rect.size,
-		Vector2(rect.position.x, rect.position.y + rect.size.y),
-	])
+## Deterministic, quietly varied yard colours, taken from where the land is
+## rather than from a block index, because derived lots have no index a map
+## author ever chose.
+static func _yard_color(centroid: Vector2) -> Color:
+	var cell: int = int(absf(floorf(centroid.x / 400.0)) + absf(floorf(centroid.y / 400.0)) * 3.0)
+	var shift: float = float(cell % 4) * 0.018
+	return Color(0.30 + shift, 0.44 + shift * 0.6, 0.28 + shift * 0.4)
 
 
 # ---------------------------------------------------------------------------
@@ -456,16 +494,11 @@ func _build_building(parent: Node2D, building: Dictionary) -> void:
 func _inset_polygon(polygon: PackedVector2Array, scale: float) -> PackedVector2Array:
 	if polygon.size() == 0:
 		return polygon
-	var centroid := Vector2.ZERO
-	for p in polygon:
-		centroid += p
-	centroid /= float(polygon.size())
-
+	var centroid: Vector2 = MapGeometry.polygon_centroid(polygon)
 	var inset := PackedVector2Array()
 	for p in polygon:
 		inset.append(centroid + (p - centroid) * scale)
 	return inset
-
 
 
 # ---------------------------------------------------------------------------

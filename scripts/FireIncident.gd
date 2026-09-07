@@ -122,21 +122,19 @@ func setup(
 ## with nothing hidden behind it: it simply starts higher when the fire is
 ## further away.
 ##
-## travel_distance is a grid distance, not a straight line, because every road
-## on this map is axis aligned and a driver cannot cut the corner.
+## travel_distance is the length of the shortest route ALONG THE ROADS, which
+## RoadGraph.route_length measures. It used to be a grid distance, |dx| + |dy|,
+## which is the right answer only while every road is axis aligned: on a map
+## whose roads bend and meet at real angles a grid distance is not any journey
+## the truck could make, and it under-pays a call the roads have to reach the
+## long way round. Nothing here computes the distance; Main measures it at
+## dispatch, from wherever the truck actually is.
 static func escalation_limit_for(tuning: Node, travel_distance: float) -> float:
 	var base: float = tuning.fire_escalation_duration
 	if tuning.escalation_travel_speed <= 0.0:
 		return base
 	var allowance: float = maxf(travel_distance, 0.0) / tuning.escalation_travel_speed
 	return base + minf(allowance, tuning.escalation_travel_allowance_max)
-
-
-## The distance rule the allowance is priced from: along the grid, never through
-## the buildings.
-static func travel_distance_between(from: Vector2, to: Vector2) -> float:
-	var delta: Vector2 = (to - from).abs()
-	return delta.x + delta.y
 
 
 func _seed_flames(polygon: PackedVector2Array) -> void:
