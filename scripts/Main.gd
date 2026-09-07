@@ -106,10 +106,17 @@ func spawn_incident(candidate: Dictionary) -> FireIncident:
 		push_error("no building polygon for incident candidate %s" % candidate.get("id", "?"))
 		return null
 
+	# Measured at dispatch, from wherever the truck actually is, so the clock a
+	# player is given matches the drive they are actually being asked to make.
+	# Main is the only node that knows both the truck and the candidate.
+	var travel: float = FireIncident.travel_distance_between(
+		_truck.global_position, Vector2(candidate["position"])
+	)
+
 	var incident: FireIncident = FireIncident.new()
 	incident.name = "Incident_%s" % String(candidate["id"])
 	_incidents_root.add_child(incident)
-	incident.setup(String(candidate["id"]), building_id, polygon)
+	incident.setup(String(candidate["id"]), building_id, polygon, travel)
 	return incident
 
 

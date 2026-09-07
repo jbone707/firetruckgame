@@ -97,9 +97,15 @@ var suppression_per_water_unit: float = fire_damage_per_second / spray_flow_rate
 # Fire (handoff §5)
 # ---------------------------------------------------------------------------
 
-## Seconds from dispatch to incident loss if not extinguished in time.
-## Specified by handoff §5.
-var fire_escalation_duration: float = 120.0
+## Seconds every call gets before it is lost, BEFORE the travel allowance below
+## is added to it. Handoff §5 specified 120 as a flat figure for the original
+## 1400x1000 map. On the 4000x3000 map a call needs about 8 seconds of
+## suppression and at most 3 more for a refill, so 45 is a comfortable margin
+## for the fighting itself, and the distance to the fire is paid for separately
+## rather than being buried in one number that has to cover the worst case
+## everywhere. See DEVELOPMENT_STATUS.md for the measured drive times.
+## Handoff §5 specified this value as 120; retuned here with the reason above.
+var fire_escalation_duration: float = 45.0
 
 # ---------------------------------------------------------------------------
 # Hydrants (handoff §6)
@@ -166,3 +172,22 @@ var tank_upgrade_multiplier: float = 1.25
 
 ## Truck condition (health) at the start of each shift, on a 0-100 scale.
 var truck_starting_condition: float = 100.0 # invented default, not from handoff
+
+
+# ---------------------------------------------------------------------------
+# Escalation travel allowance (handoff §5, sized in Milestone 4 Part 1)
+# ---------------------------------------------------------------------------
+
+## Expected speed, world units/second, used ONLY to turn the distance to a call
+## into the extra seconds that call is given before it escalates. Deliberately
+## about half the measured driving speed: routes across this map were driven in
+## the physics runner at an effective 220 units/second door to door, so dividing
+## by 110 hands the player twice the time the drive actually takes.
+##
+## This is not a speed the truck ever moves at, and nothing simulates it. It is
+## the exchange rate between "how far away is this fire" and "how long you get".
+var escalation_travel_speed: float = 110.0 # invented default, not from handoff
+
+## Ceiling on that allowance, seconds, so a pathological route on some future
+## map cannot hand out an escalation limit measured in minutes.
+var escalation_travel_allowance_max: float = 90.0 # invented default, not from handoff

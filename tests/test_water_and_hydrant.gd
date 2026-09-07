@@ -548,3 +548,78 @@ func test_the_hose_runs_to_the_nearest_point_of_the_truck() -> void:
 	)
 
 	_destroy(hydrant)
+
+
+## The escalation clock (Milestone 4 Part 1): a fixed base for fighting the
+## fire plus an allowance for how far the truck has to drive to reach it.
+## Deterministic for a given dispatch, never below the base, and capped.
+func test_escalation_time_is_deterministic_and_never_below_the_base() -> void:
+	var balance: Node = GameBalanceScript.new()
+	var base: float = balance.fire_escalation_duration
+
+	# Same dispatch, same answer, every time. Nothing random reaches this.
+	var first: float = FireIncidentScript.escalation_limit_for(balance, 2400.0)
+	for _repeat in range(20):
+		assert_eq(
+			FireIncidentScript.escalation_limit_for(balance, 2400.0), first,
+			"the same dispatch always gets the same clock"
+		)
+
+	# Never below the base, whatever it is handed.
+	for distance in [0.0, -500.0, 1.0, 250.0]:
+		assert_true(
+			FireIncidentScript.escalation_limit_for(balance, distance) >= base,
+			"a call %.0f units away still gets at least the %.0f second base"
+				% [distance, base]
+		)
+
+	# A fire on the truck's bumper gets exactly the base and not a second more.
+	assert_almost_eq(
+		FireIncidentScript.escalation_limit_for(balance, 0.0), base, 0.0001,
+		"a call underfoot gets the base alone"
+	)
+
+	# Further away is more time, and the allowance is the distance divided by
+	# the exchange rate, not something invented per call.
+	var near: float = FireIncidentScript.escalation_limit_for(balance, 1100.0)
+	var far: float = FireIncidentScript.escalation_limit_for(balance, 5000.0)
+	assert_true(far > near, "a further call gets longer (%.1f vs %.1f)" % [far, near])
+	assert_almost_eq(
+		near - base, 1100.0 / balance.escalation_travel_speed, 0.0001,
+		"the allowance is exactly the distance over the expected speed"
+	)
+
+	# And it is capped, so no route can hand out minutes.
+	assert_almost_eq(
+		FireIncidentScript.escalation_limit_for(balance, 999999.0),
+		base + balance.escalation_travel_allowance_max,
+		0.0001,
+		"the travel allowance is capped"
+	)
+
+	balance.free()
+
+
+## The allowance is priced along the grid, because every road on this map is
+## axis aligned and a driver cannot cut the corner. A straight line would
+## under-pay every call that needs two legs to reach.
+func test_travel_distance_is_measured_along_the_grid() -> void:
+	var straight: float = FireIncidentScript.travel_distance_between(
+		Vector2.ZERO, Vector2(300.0, 0.0)
+	)
+	assert_almost_eq(straight, 300.0, 0.0001, "a call straight down the road is its own length")
+
+	var cornered: float = FireIncidentScript.travel_distance_between(
+		Vector2.ZERO, Vector2(300.0, 400.0)
+	)
+	assert_almost_eq(cornered, 700.0, 0.0001, "a call round a corner is both legs, not the hypotenuse")
+	assert_true(
+		cornered > Vector2.ZERO.distance_to(Vector2(300.0, 400.0)),
+		"which is longer than the straight line a truck cannot drive"
+	)
+
+	assert_eq(
+		FireIncidentScript.travel_distance_between(Vector2(900.0, 200.0), Vector2(400.0, 700.0)),
+		FireIncidentScript.travel_distance_between(Vector2(400.0, 700.0), Vector2(900.0, 200.0)),
+		"the distance is the same in both directions"
+	)

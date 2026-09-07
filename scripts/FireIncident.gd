@@ -62,14 +62,19 @@ func resolve_balance() -> void:
 
 ## Builds the incident in place. polygon is the burning building's own outline
 ## in world coordinates.
-func setup(id: String, from_building_id: String, polygon: PackedVector2Array) -> void:
+func setup(
+	id: String,
+	from_building_id: String,
+	polygon: PackedVector2Array,
+	travel_distance: float = 0.0
+) -> void:
 	resolve_balance()
 	incident_id = id
 	building_id = from_building_id
 	health = balance.fire_starting_health
 	max_health = health
 	escalation = 0.0
-	escalation_limit = balance.fire_escalation_duration
+	escalation_limit = escalation_limit_for(balance, travel_distance)
 	_terminal = false
 
 	collision_layer = 0b0100  # layer 3, fire_target
@@ -105,6 +110,33 @@ func setup(id: String, from_building_id: String, polygon: PackedVector2Array) ->
 
 	_seed_flames(shape_polygon)
 	queue_redraw()
+
+
+## How long this call gets before it is lost: a fixed base for fighting the fire,
+## plus an allowance for the distance the truck has to cover to reach it.
+##
+## The base alone had to cover the worst drive on the map when it was one flat
+## number, which made every near call slack and told the player nothing. Paying
+## for the distance separately means a far call is a longer drive rather than a
+## harder fire, and the number on the HUD still counts down in plain seconds
+## with nothing hidden behind it: it simply starts higher when the fire is
+## further away.
+##
+## travel_distance is a grid distance, not a straight line, because every road
+## on this map is axis aligned and a driver cannot cut the corner.
+static func escalation_limit_for(tuning: Node, travel_distance: float) -> float:
+	var base: float = tuning.fire_escalation_duration
+	if tuning.escalation_travel_speed <= 0.0:
+		return base
+	var allowance: float = maxf(travel_distance, 0.0) / tuning.escalation_travel_speed
+	return base + minf(allowance, tuning.escalation_travel_allowance_max)
+
+
+## The distance rule the allowance is priced from: along the grid, never through
+## the buildings.
+static func travel_distance_between(from: Vector2, to: Vector2) -> float:
+	var delta: Vector2 = (to - from).abs()
+	return delta.x + delta.y
 
 
 func _seed_flames(polygon: PackedVector2Array) -> void:

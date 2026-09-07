@@ -19,6 +19,9 @@ const PANEL_WIDTH: float = 460.0
 const BAR_SIZE: Vector2 = Vector2(190.0, 18.0)
 const EDGE_MARGIN: float = 18.0
 
+## Seconds of margin below which the countdown starts shouting.
+const URGENT_SECONDS: float = 30.0
+
 
 var _hud: Control
 var _condition_bar: ProgressBar
@@ -47,6 +50,7 @@ var _arrow: Control
 var _arrow_direction: Vector2 = Vector2.ZERO
 var _arrow_position: Vector2 = Vector2.ZERO
 var _arrow_visible: bool = false
+var _margin_urgent: bool = false
 
 
 func _ready() -> void:
@@ -342,11 +346,25 @@ func set_call(call_number: int, total_calls: int) -> void:
 	_call_label.text = "Call %d of %d" % [call_number, total_calls]
 
 
+## The escalation countdown. Under URGENT_SECONDS it says so in words and grows,
+## because a player watching the road is not reading a colour, and colour alone
+## is never the carrier of state in this HUD (handoff section 6).
 func set_margin_seconds(seconds: float) -> void:
 	if seconds <= 0.0:
 		_margin_label.text = "Time left none"
+		_set_margin_urgent(true)
 		return
-	_margin_label.text = "Time left %d:%02d" % [int(seconds) / 60, int(seconds) % 60]
+	var clock: String = "%d:%02d" % [int(seconds) / 60, int(seconds) % 60]
+	var urgent: bool = seconds < URGENT_SECONDS
+	_margin_label.text = "Time left %s, running out" % clock if urgent else "Time left %s" % clock
+	_set_margin_urgent(urgent)
+
+
+func _set_margin_urgent(urgent: bool) -> void:
+	if _margin_urgent == urgent:
+		return
+	_margin_urgent = urgent
+	_margin_label.add_theme_font_size_override("font_size", 20 if urgent else 15)
 
 
 func set_credits(credits: int) -> void:
