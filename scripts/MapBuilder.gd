@@ -13,11 +13,37 @@ class_name MapBuilder
 ## The whole map is therefore tiled: road pavement, or block. Nothing between
 ## the two is drivable.
 
-const ROAD_COLOR: Color = Color(0.28, 0.28, 0.30)
-const SIDEWALK_COLOR: Color = Color(0.72, 0.72, 0.68)
+## Warm, near-black asphalt (Part 2). Every road, and every junction where two
+## roads cross, is filled with this exact colour and nothing else, which is
+## what makes the network read as one continuous surface: two overlapping
+## opaque fills of an identical colour cannot show a seam, whereas the old
+## per-road Line2D (translucent-looking at its round joints and caps) showed
+## one at every crossing and made junctions read as raised or sunken boxes.
+const ASPHALT_COLOR: Color = Color(0.14, 0.13, 0.125)
+
+## Concrete band around every block. Kept clearly lighter than ASPHALT_COLOR
+## (it was already lighter than the old road grey; the gap is far bigger now)
+## so "road" and "sidewalk" are never a lighting judgement call.
+const SIDEWALK_COLOR: Color = Color(0.74, 0.72, 0.67)
+
+## The line where concrete meets asphalt, lighter again than the sidewalk
+## itself so the boundary a fire truck must not cross reads as a drawn edge
+## rather than a shade difference the player has to infer.
+const KERB_COLOR: Color = Color(0.90, 0.87, 0.79)
+
+## Dashed lane marking down the middle of every road. Muted pale yellow, kept
+## dimmer than KERB_COLOR so the two kinds of line do not compete for the same
+## "this is the important line" read.
+const CENTERLINE_COLOR: Color = Color(0.82, 0.77, 0.52)
 
 ## Width of the concrete band around the edge of every block, world units.
 const SIDEWALK_WIDTH: float = 34.0
+const KERB_WIDTH: float = 5.0
+const CENTERLINE_WIDTH: float = 6.0
+
+## Dash pattern for the centreline, world units along the road.
+const DASH_LENGTH: float = 44.0
+const DASH_GAP: float = 32.0
 
 ## The physics layer everything that is not a building sits on inside a block:
 ## sidewalk, garden, fence, kerb. It stops the truck, exactly as a building
@@ -31,15 +57,23 @@ const WALL_THICKNESS: float = 40.0
 const HYDRANT_COLOR: Color = Color(0.85, 0.05, 0.05)
 const INCIDENT_MARKER_COLOR: Color = Color(1.0, 0.65, 0.0)
 const LABEL_COLOR: Color = Color(0.95, 0.95, 0.90)
-const KERB_COLOR: Color = Color(0.55, 0.55, 0.52)
 
+## Draw order, bottom to top. Every drawn node sets exactly one of these.
+## Road markings sit directly on the asphalt below them; sidewalk and yard
+## are drawn above the road so any antialiased pixel on their shared edge
+## resolves to concrete, not tarmac; the kerb is drawn last of the ground
+## layers so it sits cleanly on top of that seam, which is the one edge in
+## the whole scene that is *supposed* to show, being the line between
+## drivable and not.
 const Z_ROAD: int = 0
-const Z_SIDEWALK: int = 1
-const Z_YARD: int = 2
-const Z_BUILDING_BODY: int = 3
-const Z_BUILDING_ROOF: int = 4
-const Z_LABEL: int = 5
-const Z_MARKER: int = 6
+const Z_ROAD_MARKING: int = 1
+const Z_SIDEWALK: int = 2
+const Z_YARD: int = 3
+const Z_KERB: int = 4
+const Z_BUILDING_BODY: int = 5
+const Z_BUILDING_ROOF: int = 6
+const Z_LABEL: int = 7
+const Z_MARKER: int = 8
 
 var _definition: MapDefinition = null
 
@@ -70,8 +104,30 @@ func build(definition: MapDefinition) -> void:
 	walls_root.name = "EdgeWalls"
 	add_child(walls_root)
 
+	# Every road in this map is one straight, axis-aligned span (see
+	# MapDefinition.create_fictional_neighbourhood), so it can be treated as a
+	# single rectangle rather than a polyline. That rectangle is computed once
+	# and reused for the asphalt fill, the junction search and the centreline
+	# gaps, so all three agree exactly on where each road is.
+	var road_rects: Array[Rect2] = []
 	for road in definition.roads:
-		_build_road(roads_root, road)
+		road_rects.append(_road_rect(road["points"], road["width"]))
+
+	for i in range(definition.roads.size()):
+		_build_road_slab(roads_root, definition.roads[i], road_rects[i])
+
+	# A junction is just the overlap of two road rectangles. Filling that
+	# overlap with one more opaque ASPHALT_COLOR polygon, drawn after every
+	# road slab so it sits on top, is the "opaque intersection square drawn
+	# last" approach from the handoff: it guarantees the crossing is a single
+	# flat fill with no seam, without having to merge the road polygons.
+	var junctions: Array[Rect2] = _find_junctions(road_rects)
+	for junction in junctions:
+		_build_junction_slab(roads_root, junction)
+
+	for i in range(definition.roads.size()):
+		_build_road_markings(roads_root, definition.roads[i], road_rects[i], junctions)
+		_build_road_label(roads_root, definition.roads[i])
 
 	for block in definition.blocks:
 		_build_block(blocks_root, block)
@@ -132,28 +188,125 @@ func get_building_polygon(building_id: String) -> PackedVector2Array:
 # Road, sidewalk and label construction
 # ---------------------------------------------------------------------------
 
-func _build_road(parent: Node2D, road: Dictionary) -> void:
+## The axis-aligned rectangle a straight road occupies, kerb to kerb. Works
+## for any two-point road whose points share an x (a north-south avenue) or a
+## share a y (an east-west street), which is every road this map produces.
+func _road_rect(points: PackedVector2Array, width: float) -> Rect2:
+	var p0: Vector2 = points[0]
+	var p1: Vector2 = points[points.size() - 1]
+	var half_width: float = width / 2.0
+	if is_equal_approx(p0.x, p1.x):
+		var top: float = min(p0.y, p1.y)
+		return Rect2(p0.x - half_width, top, width, abs(p1.y - p0.y))
+	else:
+		var left: float = min(p0.x, p1.x)
+		return Rect2(left, p0.y - half_width, abs(p1.x - p0.x), width)
+
+
+## Every place two road rectangles overlap: the sixteen real junctions. Found
+## purely from geometry, not from the street/avenue grid constants, so this
+## keeps working unchanged if the road layout ever does.
+func _find_junctions(road_rects: Array[Rect2]) -> Array[Rect2]:
+	var junctions: Array[Rect2] = []
+	for i in range(road_rects.size()):
+		for j in range(i + 1, road_rects.size()):
+			if not road_rects[i].intersects(road_rects[j]):
+				continue
+			var overlap: Rect2 = road_rects[i].intersection(road_rects[j])
+			if overlap.size.x > 0.0 and overlap.size.y > 0.0:
+				junctions.append(overlap)
+	return junctions
+
+
+func _build_road_slab(parent: Node2D, road: Dictionary, rect: Rect2) -> void:
+	var slab := Polygon2D.new()
+	slab.name = "Road_%s" % String(road["id"])
+	slab.polygon = _rect_polygon(rect)
+	slab.color = ASPHALT_COLOR
+	slab.z_index = Z_ROAD
+	parent.add_child(slab)
+
+
+## Drawn after every _build_road_slab call, so within Roads (same parent, same
+## z-index) it is later in child order and therefore on top: the fill that
+## actually seals each junction into one continuous surface.
+func _build_junction_slab(parent: Node2D, junction: Rect2) -> void:
+	var slab := Polygon2D.new()
+	slab.name = "Junction_%d_%d" % [int(junction.position.x), int(junction.position.y)]
+	slab.polygon = _rect_polygon(junction)
+	slab.color = ASPHALT_COLOR
+	slab.z_index = Z_ROAD
+	parent.add_child(slab)
+
+
+## A rectangle running from a to b, width wide, oriented along a-b. Used for
+## the dashed centreline; road slabs use _road_rect/_rect_polygon directly
+## since every road is axis-aligned, but this stays general along the road's
+## own direction so a dash never needs special-casing per axis.
+func _oriented_rect_polygon(a: Vector2, b: Vector2, width: float) -> PackedVector2Array:
+	var direction: Vector2 = (b - a).normalized()
+	var perpendicular: Vector2 = Vector2(-direction.y, direction.x) * (width / 2.0)
+	return PackedVector2Array([
+		a + perpendicular, b + perpendicular, b - perpendicular, a - perpendicular,
+	])
+
+
+## The dashed centreline for one road, broken wherever the road crosses
+## another one. A junction is filled solid (item 2) precisely so it must never
+## carry a lane marking on top; a dash running through it would be the same
+## "line crosses a box" bug the kerb fix is also avoiding, in yellow instead
+## of concrete.
+func _build_road_markings(parent: Node2D, road: Dictionary, rect: Rect2, junctions: Array[Rect2]) -> void:
+	var points: PackedVector2Array = road["points"]
+	var p0: Vector2 = points[0]
+	var p1: Vector2 = points[points.size() - 1]
+	var vertical: bool = is_equal_approx(p0.x, p1.x)
+	var axis_start: float = min(p0.y, p1.y) if vertical else min(p0.x, p1.x)
+	var length: float = rect.size.y if vertical else rect.size.x
+
+	# Every junction this road passes through, as a [start, end] gap along the
+	# road's own axis, relative to axis_start.
+	var gaps: Array = []
+	for junction in junctions:
+		if not rect.intersects(junction):
+			continue
+		var overlap: Rect2 = rect.intersection(junction)
+		if overlap.size.x <= 0.0 or overlap.size.y <= 0.0:
+			continue
+		var lo: float = (overlap.position.y if vertical else overlap.position.x) - axis_start
+		var hi: float = lo + (overlap.size.y if vertical else overlap.size.x)
+		gaps.append([lo, hi])
+	gaps.sort_custom(func(a, b): return a[0] < b[0])
+
+	var runs: Array = []
+	var cursor: float = 0.0
+	for gap in gaps:
+		if gap[0] > cursor:
+			runs.append([cursor, gap[0]])
+		cursor = max(cursor, gap[1])
+	if cursor < length:
+		runs.append([cursor, length])
+
+	var dash_index: int = 0
+	for run in runs:
+		var t: float = run[0]
+		while t < run[1]:
+			var dash_end: float = min(t + DASH_LENGTH, run[1])
+			var a: Vector2 = Vector2(p0.x, axis_start + t) if vertical else Vector2(axis_start + t, p0.y)
+			var b: Vector2 = Vector2(p0.x, axis_start + dash_end) if vertical else Vector2(axis_start + dash_end, p0.y)
+			var dash := Polygon2D.new()
+			dash.name = "Centreline_%s_%d" % [String(road["id"]), dash_index]
+			dash.polygon = _oriented_rect_polygon(a, b, CENTERLINE_WIDTH)
+			dash.color = CENTERLINE_COLOR
+			dash.z_index = Z_ROAD_MARKING
+			parent.add_child(dash)
+			dash_index += 1
+			t += DASH_LENGTH + DASH_GAP
+
+
+func _build_road_label(parent: Node2D, road: Dictionary) -> void:
 	var points: PackedVector2Array = road["points"]
 	var width: float = road["width"]
-
-	var surface := Line2D.new()
-	surface.name = "Road_%s" % String(road["id"])
-	surface.points = points
-	surface.width = width
-	surface.default_color = ROAD_COLOR
-	surface.joint_mode = Line2D.LINE_JOINT_ROUND
-	surface.begin_cap_mode = Line2D.LINE_CAP_ROUND
-	surface.end_cap_mode = Line2D.LINE_CAP_ROUND
-	surface.z_index = Z_ROAD
-	parent.add_child(surface)
-
-	if points.size() < 2:
-		return
-
-	# Sidewalks are no longer drawn per road. They belong to the blocks now,
-	# which run kerb to kerb, so a sidewalk laid alongside a road would be a
-	# second one on top of the block's own and would spill across every
-	# junction it passed through.
 	var direction: Vector2 = (points[points.size() - 1] - points[0]).normalized()
 	var perpendicular := Vector2(-direction.y, direction.x)
 
@@ -201,16 +354,21 @@ func _build_block(parent: Node2D, block: Dictionary) -> void:
 		yard.z_index = Z_YARD
 		parent.add_child(yard)
 
-	# The kerb: a darker line right on the block's edge, so the boundary between
+	# The kerb: a light line right on the block's edge, so the boundary between
 	# what can be driven on and what cannot is a visible edge rather than a
-	# change of colour the player has to infer.
+	# change of colour the player has to infer. A block's rect is exactly the
+	# land between roads (blocks run kerb to kerb, handoff on this file's own
+	# comment above), so this line sits exactly on every road edge and, because
+	# a block never extends into a junction, it is never drawn across one: the
+	# same "break it at intersections" rule item 3 asks for, satisfied by the
+	# block geometry itself rather than by special-casing the corners.
 	var kerb := Line2D.new()
 	kerb.name = "Kerb_%s" % block_id
 	kerb.points = _rect_polygon(rect)
 	kerb.closed = true
-	kerb.width = 4.0
+	kerb.width = KERB_WIDTH
 	kerb.default_color = KERB_COLOR
-	kerb.z_index = Z_SIDEWALK
+	kerb.z_index = Z_KERB
 	parent.add_child(kerb)
 
 	var body := StaticBody2D.new()
