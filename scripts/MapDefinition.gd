@@ -109,8 +109,15 @@ static func create_fictional_neighbourhood() -> MapDefinition:
 	const SIDE_MARGIN: float = 60.0
 	const HOUSE_GAP: float = 40.0
 
-	# Hydrants and incident markers stand on the sidewalk, just past the kerb.
+	# Incident markers stand on the sidewalk, just past the kerb.
 	const KERB_STANDOFF: float = 10.0
+
+	# Hydrants stand ON the kerb face, level with the road edge rather than set
+	# back onto the sidewalk. Ten units does not sound like much, but a hydrant
+	# set back is ten units further from every truck that pulls up to it, and
+	# hydrants are the one piece of map furniture the player has to get close to
+	# on purpose.
+	const HYDRANT_STANDOFF: float = 0.0
 
 	var def := MapDefinition.new()
 	def.schema_version = 2
@@ -238,13 +245,13 @@ static func create_fictional_neighbourhood() -> MapDefinition:
 	# Hydrants stand at the kerb, spread so no call is a long way from water.
 	# h_station is the one outside the station.
 	def.hydrants = [
-		{"id": "h_station", "position": Vector2(AVENUE_X[0] + HALF_ROAD + KERB_STANDOFF, 700.0)},
-		{"id": "h_ash_fir", "position": Vector2(1700.0, STREET_Y[0] + HALF_ROAD + KERB_STANDOFF)},
-		{"id": "h_birch_west", "position": Vector2(800.0, STREET_Y[1] - HALF_ROAD - KERB_STANDOFF)},
-		{"id": "h_grove_mid", "position": Vector2(AVENUE_X[2] - HALF_ROAD - KERB_STANDOFF, 1500.0)},
-		{"id": "h_cedar_east", "position": Vector2(3000.0, STREET_Y[2] + HALF_ROAD + KERB_STANDOFF)},
-		{"id": "h_dogwood_west", "position": Vector2(900.0, STREET_Y[3] - HALF_ROAD - KERB_STANDOFF)},
-		{"id": "h_hazel_south", "position": Vector2(AVENUE_X[3] - HALF_ROAD - KERB_STANDOFF, 2300.0)},
+		{"id": "h_station", "position": Vector2(AVENUE_X[0] + HALF_ROAD + HYDRANT_STANDOFF, 700.0)},
+		{"id": "h_ash_fir", "position": Vector2(1700.0, STREET_Y[0] + HALF_ROAD + HYDRANT_STANDOFF)},
+		{"id": "h_birch_west", "position": Vector2(800.0, STREET_Y[1] - HALF_ROAD - HYDRANT_STANDOFF)},
+		{"id": "h_grove_mid", "position": Vector2(AVENUE_X[2] - HALF_ROAD - HYDRANT_STANDOFF, 1500.0)},
+		{"id": "h_cedar_east", "position": Vector2(3000.0, STREET_Y[2] + HALF_ROAD + HYDRANT_STANDOFF)},
+		{"id": "h_dogwood_west", "position": Vector2(900.0, STREET_Y[3] - HALF_ROAD - HYDRANT_STANDOFF)},
+		{"id": "h_hazel_south", "position": Vector2(AVENUE_X[3] - HALF_ROAD - HYDRANT_STANDOFF, 2300.0)},
 	]
 
 	return def

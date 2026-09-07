@@ -183,7 +183,10 @@ func _physics_process(_delta: float) -> void:
 
 
 func _update_hydrants() -> void:
-	var truck_position: Vector2 = _truck.global_position
+	# The hydrant rule measures to the truck's bodywork, not to its centre, so
+	# it needs the shape's placement and size rather than a position.
+	var truck_transform: Transform2D = _truck.global_transform
+	var truck_half_extents: Vector2 = _truck.get_collision_half_extents()
 	var truck_speed: float = _truck.get_forward_speed()
 	var hookup_held: bool = Input.is_action_pressed("hydrant_hookup")
 	var tank_is_full: bool = _water.water_remaining >= _water.tank_capacity
@@ -194,7 +197,8 @@ func _update_hydrants() -> void:
 
 	for hydrant in _hydrants:
 		var outcome: Dictionary = hydrant.evaluate(
-			truck_position,
+			truck_transform,
+			truck_half_extents,
 			truck_speed,
 			hookup_held,
 			tank_is_full,

@@ -334,25 +334,25 @@ blocks = Array[Dictionary]([{
 }])
 hydrants = Array[Dictionary]([{
 "id": "h_station",
-"position": Vector2(550, 700)
+"position": Vector2(540, 700)
 }, {
 "id": "h_ash_fir",
-"position": Vector2(1700, 400)
+"position": Vector2(1700, 390)
 }, {
 "id": "h_birch_west",
-"position": Vector2(800, 930)
+"position": Vector2(800, 940)
 }, {
 "id": "h_grove_mid",
-"position": Vector2(2450, 1500)
+"position": Vector2(2460, 1500)
 }, {
 "id": "h_cedar_east",
-"position": Vector2(3000, 2060)
+"position": Vector2(3000, 2050)
 }, {
 "id": "h_dogwood_west",
-"position": Vector2(900, 2590)
+"position": Vector2(900, 2600)
 }, {
 "id": "h_hazel_south",
-"position": Vector2(3550, 2300)
+"position": Vector2(3560, 2300)
 }])
 incident_candidates = Array[Dictionary]([{
 "building_id": "b_00_1",

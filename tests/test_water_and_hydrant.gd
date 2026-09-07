@@ -12,6 +12,10 @@ const GameBalanceScript: GDScript = preload("res://scripts/GameBalance.gd")
 
 const FRAME_DELTA: float = 1.0 / 60.0
 
+## Half the truck's 90 x 40 collision rectangle, the same shape
+## TruckController.get_collision_half_extents() reads off Truck.tscn.
+const TRUCK_HALF: Vector2 = Vector2(45.0, 20.0)
+
 
 func _make_water() -> WaterSystem:
 	var balance: Node = GameBalanceScript.new()
@@ -20,6 +24,14 @@ func _make_water() -> WaterSystem:
 	water.tank_capacity = balance.tank_capacity
 	water.water_remaining = balance.tank_capacity
 	return water
+
+
+func _make_hydrant() -> Hydrant:
+	var hydrant: Hydrant = HydrantScript.new()
+	hydrant.balance = GameBalanceScript.new()
+	hydrant.resolve_balance()
+	hydrant.hydrant_id = "hyd_test"
+	return hydrant
 
 
 func _destroy(node: Node) -> void:
@@ -256,28 +268,38 @@ func test_hydrant_refuses_a_moving_truck_and_prompts_in_words() -> void:
 	hydrant.hydrant_id = "hyd_test"
 	var balance: Node = hydrant.balance
 
-	var at_hydrant: Vector2 = Vector2.ZERO
-	var far_away: Vector2 = Vector2(balance.hydrant_interaction_radius * 3.0, 0.0)
+	var at_hydrant: Transform2D = Transform2D(0.0, Vector2.ZERO)
+	var far_away: Transform2D = Transform2D(
+		0.0, Vector2(balance.hydrant_interaction_radius * 3.0, 0.0)
+	)
 	var too_fast: float = balance.hydrant_max_hookup_speed + 25.0
 	var slow: float = balance.hydrant_max_hookup_speed - 1.0
 
-	var out_of_range: Dictionary = hydrant.evaluate(far_away, slow, true, false, false, 0.0)
+	var out_of_range: Dictionary = hydrant.evaluate(
+		far_away, TRUCK_HALF, slow, true, false, false, 0.0
+	)
 	assert_eq(out_of_range["prompt"], Hydrant.Prompt.NONE, "no prompt out of range")
 	assert_false(out_of_range["should_refill"], "no refill out of range")
 
-	var moving: Dictionary = hydrant.evaluate(at_hydrant, too_fast, true, false, false, 0.0)
+	var moving: Dictionary = hydrant.evaluate(
+		at_hydrant, TRUCK_HALF, too_fast, true, false, false, 0.0
+	)
 	assert_eq(moving["prompt"], Hydrant.Prompt.TOO_FAST, "a moving truck is told to slow down")
 	assert_false(moving["should_refill"], "a moving truck does not refill")
 
-	var not_holding: Dictionary = hydrant.evaluate(at_hydrant, slow, false, false, false, 0.0)
+	var not_holding: Dictionary = hydrant.evaluate(
+		at_hydrant, TRUCK_HALF, slow, false, false, false, 0.0
+	)
 	assert_eq(not_holding["prompt"], Hydrant.Prompt.HOLD_TO_HOOK_UP, "stopped, told to hold E")
 	assert_false(not_holding["should_refill"], "releasing E does not refill")
 
-	var hooking: Dictionary = hydrant.evaluate(at_hydrant, slow, true, false, false, 0.4)
+	var hooking: Dictionary = hydrant.evaluate(
+		at_hydrant, TRUCK_HALF, slow, true, false, false, 0.4
+	)
 	assert_eq(hooking["prompt"], Hydrant.Prompt.HOOKING_UP, "holding E starts the hookup")
 	assert_true(hooking["should_refill"], "holding E requests the refill")
 
-	var full: Dictionary = hydrant.evaluate(at_hydrant, slow, true, true, true, 1.0)
+	var full: Dictionary = hydrant.evaluate(at_hydrant, TRUCK_HALF, slow, true, true, true, 1.0)
 	assert_eq(full["prompt"], Hydrant.Prompt.TANK_FULL, "a full tank says so")
 	assert_false(full["should_refill"], "a full tank stops refilling")
 
@@ -396,3 +418,133 @@ func test_a_full_tank_takes_about_three_seconds_from_hookup() -> void:
 		"an empty tank fills in the time the balance values say it should"
 	)
 	_destroy(water)
+
+
+## Range is measured to the truck's bodywork, not to its centre (Part 1 of this
+## milestone). The old centre rule made the answer depend on which way the truck
+## happened to be pointing: nose in at a kerb, the centre of a 90 long truck is
+## 45 further from the hydrant than it is when the same truck is parked
+## alongside with its 40 wide flank to the same kerb. A player who pulled up
+## square to a hydrant, bumper almost touching it, was told nothing at all.
+func test_range_is_measured_to_the_truck_body_not_its_centre() -> void:
+	var hydrant: Hydrant = _make_hydrant()
+
+	# A hydrant 50 units off the truck's nose. The nose is 45 from the centre,
+	# so the bodywork is 5 away and the centre is 50 away.
+	hydrant.position = Vector2(50.0, 0.0)
+	var facing_it: Transform2D = Transform2D(0.0, Vector2.ZERO)
+	assert_almost_eq(
+		hydrant.distance_to_truck(facing_it, TRUCK_HALF), 5.0, 0.001,
+		"a hydrant 50 from the centre, nose on, is 5 from the bumper"
+	)
+
+	# The same hydrant with the truck turned side on: now 30 from the flank.
+	var side_on: Transform2D = Transform2D(PI / 2.0, Vector2.ZERO)
+	assert_almost_eq(
+		hydrant.distance_to_truck(side_on, TRUCK_HALF), 30.0, 0.001,
+		"and 30 from the flank when the truck is turned side on"
+	)
+
+	# Parked on top of it: zero, not "somewhere inside, distance unclear".
+	hydrant.position = Vector2(10.0, 5.0)
+	assert_eq(
+		hydrant.distance_to_truck(facing_it, TRUCK_HALF), 0.0,
+		"a hydrant under the truck is zero away"
+	)
+
+	_destroy(hydrant)
+
+
+## The three approaches James asked about, at the distances measured against the
+## real map in this milestone's measurement pass. All three must hook up.
+func test_every_sensible_way_of_parking_at_a_hydrant_is_in_range() -> void:
+	var hydrant: Hydrant = _make_hydrant()
+	var radius: float = hydrant.balance.hydrant_interaction_radius
+
+	# Measured on the map: a hydrant on the kerb face, the truck stopped hard
+	# against that kerb, is 0 to 1 units from the bodywork parked alongside and
+	# 0 nose in. A 45 degree sprawl is about 30. Stopping a truck length short
+	# along the kerb is 46, and overshooting by 160 units of street is 115.
+	var approaches: Dictionary = {
+		"alongside, against the kerb": Vector2(0.0, 21.0),
+		"nose in, square to the kerb": Vector2(46.0, 0.0),
+		"a sloppy 45 degrees": Vector2(40.0, 40.0),
+		"a truck length short along the kerb": Vector2(21.0, 91.0),
+		"160 units of street past it": Vector2(21.0, 161.0),
+	}
+	for label in approaches:
+		hydrant.position = approaches[label]
+		var parked := Transform2D(PI / 2.0, Vector2.ZERO)
+		var distance: float = hydrant.distance_to_truck(parked, TRUCK_HALF)
+		assert_true(
+			hydrant.is_truck_in_range(parked, TRUCK_HALF),
+			"%s (%.1f from the bodywork, radius %.1f) must be in range"
+				% [label, distance, radius]
+		)
+
+	# The far lane of a 280 unit road stays out, which is the one thing the rule
+	# should still ask for: pull over to the hydrant's side of the street.
+	hydrant.position = Vector2(0.0, 220.0)
+	var far_lane := Transform2D(PI / 2.0, Vector2.ZERO)
+	assert_false(
+		hydrant.is_truck_in_range(far_lane, TRUCK_HALF),
+		"the far side of the street (%.1f from the bodywork) stays out of range"
+			% hydrant.distance_to_truck(far_lane, TRUCK_HALF)
+	)
+
+	_destroy(hydrant)
+
+
+## Rolling to a halt with E already held used to flicker between "Slow down to
+## hook up" and "Hold E to hook up" over the last stretch of the stop, because
+## the threshold was a near dead stop. A slow creep now counts.
+func test_a_slow_creep_counts_as_stopped_enough_to_hook_up() -> void:
+	var hydrant: Hydrant = _make_hydrant()
+	var balance: Node = hydrant.balance
+	var at_hydrant := Transform2D(0.0, Vector2.ZERO)
+
+	assert_true(
+		balance.hydrant_max_hookup_speed >= 20.0 and balance.hydrant_max_hookup_speed <= 30.0,
+		"the creep allowance should be around 20 to 30 units/s, is %.1f"
+			% balance.hydrant_max_hookup_speed
+	)
+
+	var creeping: Dictionary = hydrant.evaluate(
+		at_hydrant, TRUCK_HALF, 18.0, true, false, false, 0.0
+	)
+	assert_eq(
+		creeping["prompt"], Hydrant.Prompt.HOOKING_UP,
+		"creeping at 18 units/s with E held starts the hookup"
+	)
+	assert_true(creeping["should_refill"], "and asks for the refill")
+
+	# Still a rule, not an abolition: driving past does not hook up.
+	var driving: Dictionary = hydrant.evaluate(
+		at_hydrant, TRUCK_HALF, 120.0, true, false, false, 0.0
+	)
+	assert_eq(
+		driving["prompt"], Hydrant.Prompt.TOO_FAST, "driving past is still refused, in words"
+	)
+	assert_false(driving["should_refill"], "and does not refill")
+
+	_destroy(hydrant)
+
+
+## The hose is drawn to the same point the range rule measures to, so the line
+## the player sees is the distance the rule used.
+func test_the_hose_runs_to_the_nearest_point_of_the_truck() -> void:
+	var hydrant: Hydrant = _make_hydrant()
+
+	hydrant.position = Vector2(0.0, 60.0)
+	var truck := Transform2D(0.0, Vector2.ZERO)
+	var point: Vector2 = hydrant.nearest_point_on_truck(truck, TRUCK_HALF)
+	assert_almost_eq(point.x, 0.0, 0.001, "the hose meets the truck's flank, not its centre")
+	assert_almost_eq(point.y, 20.0, 0.001, "at the near side of a 40 wide body")
+	assert_almost_eq(
+		point.distance_to(hydrant.position),
+		hydrant.distance_to_truck(truck, TRUCK_HALF),
+		0.001,
+		"and its length is exactly the distance the range rule measures"
+	)
+
+	_destroy(hydrant)

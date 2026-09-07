@@ -83,6 +83,17 @@ func get_forward() -> Vector2:
 	return Vector2.RIGHT.rotated(rotation)
 
 
+## Half the truck's collision rectangle, read from the shape itself rather than
+## restated as a constant, so a change to Truck.tscn cannot leave this lying.
+## Falls back to the shipped 90 x 40 if the shape is missing, which is the only
+## thing a caller could sensibly do with no shape to measure.
+func get_collision_half_extents() -> Vector2:
+	var collision: CollisionShape2D = get_node_or_null("CollisionShape2D")
+	if collision != null and collision.shape is RectangleShape2D:
+		return (collision.shape as RectangleShape2D).size * 0.5
+	return Vector2(45.0, 20.0)
+
+
 func get_forward_speed() -> float:
 	return velocity.dot(get_forward())
 

@@ -34,6 +34,7 @@ func _run() -> void:
 	await _check_the_call_arrow_points_at_the_fire_from_any_heading()
 	await _check_the_call_arrow_hides_once_the_fire_is_on_screen()
 	await _check_an_empty_lot_stops_the_truck()
+	await _check_every_approach_to_a_hydrant_hooks_up()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -486,6 +487,104 @@ func _check_an_empty_lot_stops_the_truck() -> void:
 		deepest_x < lot.position.x,
 		"four seconds of throttle at an empty lot never crosses its kerb"
 			+ " (deepest x %.1f, kerb at %.1f)" % [deepest_x, lot.position.x]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## Pulling up to a hydrant, three ways, in the real scene against the real map.
+##
+## The rule this covers used to measure from the hydrant to the truck's CENTRE
+## with a 48 unit radius, and a nose-in stop at the station hydrant measured 55:
+## bumper almost touching it, and no prompt, no ring, nothing. Range is measured
+## to the truck's bodywork now, so which way the truck is pointing when it stops
+## no longer decides whether the hydrant exists.
+func _check_every_approach_to_a_hydrant_hooks_up() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var truck: Node = world[1]
+
+	var hydrant: Node = main._hydrants[0]
+	var half: Vector2 = truck.get_collision_half_extents()
+	var target: Vector2 = hydrant.global_position
+
+	_check(
+		String(hydrant.hydrant_id) == "h_station",
+		"the first hydrant is the one outside the station (%s)" % hydrant.hydrant_id
+	)
+
+	# Nose in: drive due east at the kerb the hydrant stands on, and stop where
+	# the map stops the truck.
+	truck.global_position = Vector2(target.x - 140.0, target.y)
+	truck.rotation = 0.0
+	truck.velocity = Vector2.ZERO
+	for _frame in range(3 * PHYSICS_FPS):
+		truck.set_drive_intent(1.0, 0.0, false)
+		await physics_frame
+
+	var nose_in: float = hydrant.distance_to_truck(truck.global_transform, half)
+	_check(
+		hydrant.is_truck_in_range(truck.global_transform, half),
+		"a nose-in stop at the station hydrant is in range (%.1f from the bodywork,"
+			% nose_in
+			+ " %.1f from the centre, radius %.1f)" % [
+				truck.global_position.distance_to(target), hydrant.get_interaction_radius()
+			]
+	)
+
+	# And it really is the whole rule, not just the distance: with E held and the
+	# truck stopped, this must come back as a hookup.
+	var outcome: Dictionary = hydrant.evaluate(
+		truck.global_transform, half, truck.get_forward_speed(), true, false, false, 0.0
+	)
+	_check(
+		outcome["should_refill"],
+		"and holding E there actually starts the refill (prompt %d)" % outcome["prompt"]
+	)
+
+	# Alongside: facing up the street, pulled over hard against the kerb the
+	# hydrant stands on. Pushed sideways rather than driven, because throttle
+	# only goes forward and this is about where the truck ENDS UP, not about how
+	# it got there. The stop is still the real one physics gives.
+	truck.global_position = Vector2(target.x - 120.0, target.y)
+	truck.rotation = -PI / 2.0
+	for _frame in range(PHYSICS_FPS):
+		truck.velocity = Vector2(140.0, 0.0)
+		truck.move_and_slide()
+		await physics_frame
+	_check(
+		hydrant.is_truck_in_range(truck.global_transform, half),
+		"pulling up alongside is in range (%.1f from the bodywork, %.1f from the centre)" % [
+			hydrant.distance_to_truck(truck.global_transform, half),
+			truck.global_position.distance_to(target),
+		]
+	)
+
+	# And parked alongside but stopped a full truck length short of it, which is
+	# the sloppy version of the same thing.
+	truck.global_position = Vector2(truck.global_position.x, target.y + 90.0)
+	await physics_frame
+	_check(
+		hydrant.is_truck_in_range(truck.global_transform, half),
+		"stopping a truck length short is still in range (%.1f from the bodywork)"
+			% hydrant.distance_to_truck(truck.global_transform, half)
+	)
+
+	# At a sloppy angle, driven into the kerb.
+	truck.global_position = target + Vector2(-160.0, 160.0)
+	truck.rotation = -PI / 4.0
+	truck.velocity = Vector2.ZERO
+	for _frame in range(3 * PHYSICS_FPS):
+		truck.set_drive_intent(1.0, 0.0, false)
+		await physics_frame
+	_check(
+		hydrant.is_truck_in_range(truck.global_transform, half),
+		"pulling up at a sloppy angle is in range (%.1f from the bodywork, %.1f from the centre)"
+			% [
+				hydrant.distance_to_truck(truck.global_transform, half),
+				truck.global_position.distance_to(target),
+			]
 	)
 
 	main.queue_free()

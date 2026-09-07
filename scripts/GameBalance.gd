@@ -120,11 +120,29 @@ var hydrant_hookup_time: float = 1.0
 var hydrant_refill_rate: float = 50.0
 
 ## Speed, world units/second, at or below which the truck counts as "nearly
-## stationary" for hookup purposes.
-var hydrant_max_hookup_speed: float = 15.0 # invented default, not from handoff
+## stationary" for hookup purposes. Raised from 15 to 25 after a playtest: a
+## player rolling to a halt with E already held was watching the prompt flicker
+## between "Slow down to hook up" and "Hold E to hook up" over the last stretch
+## of the stop. 25 is a slow creep, well under a tenth of top speed, and still
+## nowhere near "driving past" (handoff §6 asks for nearly stationary, which a
+## creep is).
+var hydrant_max_hookup_speed: float = 25.0 # invented default, not from handoff
 
-## Radius, world units, within which a hydrant's hookup interaction is available.
-var hydrant_interaction_radius: float = 48.0 # invented default, not from handoff
+## Radius, world units, within which a hydrant's hookup interaction is
+## available, measured from the hydrant to the NEAREST POINT OF THE TRUCK'S
+## BODY, not to its centre. The distinction is the whole fix: the truck is 90
+## long and 40 wide, so a nose-in stop puts its centre 45 further away than a
+## stop alongside does, and the old 48 unit centre rule made a perfectly sane
+## nose-in park (measured at 55 from the centre, 10 from the bumper) simply
+## fail with no explanation.
+##
+## 160 comes from the measurements in DEVELOPMENT_STATUS.md rather than from
+## taste. Against a hydrant on the kerb face: alongside 0, nose in 0, a sloppy
+## 45 degree angle about 30, stopping a truck length short 46, overshooting by
+## 160 units of street 115. All well inside. Stopping in the FAR lane of a 280
+## unit road is 200 and stays outside, which is the one thing this rule should
+## still ask for: pull over to the hydrant's side of the street.
+var hydrant_interaction_radius: float = 160.0 # invented default, not from handoff
 
 # ---------------------------------------------------------------------------
 # Session (handoff §3)
