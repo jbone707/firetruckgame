@@ -41,9 +41,14 @@ var _results_title: Label
 var _results_detail: Label
 var _shop_panel: Control
 var _shop_status: Label
-var _shop_owned: Label
+var _shop_effect: Label
+var _shop_price: Label
 var _buy_button: Button
 var _results_shop_button: Button
+var _results_again_button: Button
+var _results_calls_row: Array
+var _results_bonus_row: Array
+var _results_banked_row: Array
 var _shop_back_button: Button
 
 var _arrow: Control
@@ -137,9 +142,9 @@ func _build_hud() -> void:
 
 	_call_label = _make_label("Call 1 of 3", 18)
 	_call_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_margin_label = _make_label("Time left 2:00")
+	_margin_label = _make_label("Time left 0:00")
 	_margin_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_credits_label = _make_label("Credits 0")
+	_credits_label = _make_label(format_credits(0))
 	_credits_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_siren_label = _make_label("Siren off")
 	_siren_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -245,13 +250,47 @@ func _build_results_panel() -> void:
 	_results_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rows.add_child(_results_detail)
 
+	# The takings, itemised. One line each, label left and figure right, so the
+	# bonus is visibly a separate thing that was or was not earned rather than a
+	# number folded into a total the player has to take on trust.
+	_results_calls_row = _make_figure_row()
+	_results_bonus_row = _make_figure_row()
+	_results_banked_row = _make_figure_row()
+	rows.add_child(_results_calls_row[0])
+	rows.add_child(_results_bonus_row[0])
+	rows.add_child(_make_rule())
+	rows.add_child(_results_banked_row[0])
+
+	# One clear next action. Starting another shift is what a player almost
+	# always wants, so it is the primary and it takes focus; the shop is the
+	# considered choice and sits below it.
+	_results_again_button = _make_button("Start another shift")
+	_results_again_button.pressed.connect(func() -> void: start_shift_pressed.emit())
+	rows.add_child(_results_again_button)
+
 	_results_shop_button = _make_button("Open the shop")
 	_results_shop_button.pressed.connect(func() -> void: open_shop_pressed.emit())
 	rows.add_child(_results_shop_button)
 
-	var again_button: Button = _make_button("Start another shift")
-	again_button.pressed.connect(func() -> void: start_shift_pressed.emit())
-	rows.add_child(again_button)
+
+## A label on the left and a figure on the right, the pattern every money line
+## on the results screen uses so the numbers form a column.
+func _make_figure_row() -> Array:
+	var row := HBoxContainer.new()
+	var label := _make_label("")
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var figure := _make_label("")
+	figure.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(label)
+	row.add_child(figure)
+	return [row, label, figure]
+
+
+func _make_rule() -> Control:
+	var rule := ColorRect.new()
+	rule.color = Color(1.0, 1.0, 1.0, 0.18)
+	rule.custom_minimum_size = Vector2(0.0, 1.0)
+	return rule
 
 
 func _build_shop_panel() -> void:
@@ -260,14 +299,16 @@ func _build_shop_panel() -> void:
 	var rows: VBoxContainer = built[1]
 
 	var description := _make_label(
-		"Bigger tank. Adds 25 percent to your water capacity, permanently."
-		+ " It applies from your next shift."
+		"A bigger water tank, bought once and kept. It applies from your next shift."
 	)
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	rows.add_child(description)
 
-	_shop_owned = _make_label("")
-	rows.add_child(_shop_owned)
+	# What it does and what it costs, in numbers, above the button that does it.
+	_shop_effect = _make_label("", 18)
+	rows.add_child(_shop_effect)
+	_shop_price = _make_label("")
+	rows.add_child(_shop_price)
 
 	_buy_button = _make_button("Buy bigger tank")
 	_buy_button.pressed.connect(func() -> void: buy_upgrade_pressed.emit())
@@ -302,30 +343,86 @@ func show_playing() -> void:
 	_shop_panel.visible = false
 
 
-func show_results(succeeded: bool, reason: String, earned: int, total: int) -> void:
+## reason is a sentence from GameSession saying how the shift ended. calls_pay
+## and bonus_pay are shown separately because they are earned separately: a
+## player who cleared two calls and then lost the third keeps the call money and
+## not the bonus, and the screen should make that obvious rather than arithmetic.
+func show_results(
+	succeeded: bool,
+	reason: String,
+	calls_completed: int,
+	total_calls: int,
+	calls_pay: int,
+	bonus_pay: int,
+	banked: int
+) -> void:
 	_hud.visible = false
 	_menu_panel.visible = false
 	_results_panel.visible = true
 	_shop_panel.visible = false
+
 	_results_title.text = "Shift Complete" if succeeded else "Shift Over"
-	_results_detail.text = "%s. You earned %d credits this shift, and have %d." % [
-		reason, earned, total
+	_results_detail.text = "%s. You cleared %d of %d calls." % [
+		reason, calls_completed, total_calls
 	]
-	_focus(_results_shop_button)
+
+	_results_calls_row[1].text = "Calls cleared (%d)" % calls_completed
+	_results_calls_row[2].text = format_credits(calls_pay)
+	_results_bonus_row[1].text = (
+		"Shift bonus" if bonus_pay > 0 else "Shift bonus (not earned)"
+	)
+	_results_bonus_row[2].text = format_credits(bonus_pay)
+	_results_banked_row[1].text = "Banked in total"
+	_results_banked_row[2].text = format_credits(banked)
+
+	_focus(_results_again_button)
 
 
-func show_shop(credits: int, owned: bool, cost: int, status: String) -> void:
+## The shop has exactly three states and each one is a word on the button, never
+## a colour and never a hidden control: a button that disappears when you cannot
+## afford it leaves the player wondering whether they missed something.
+func show_shop(
+	credits: int, owned: bool, cost: int, status: String, capacity: float, multiplier: float
+) -> void:
 	_hud.visible = false
 	_menu_panel.visible = false
 	_results_panel.visible = false
 	_shop_panel.visible = true
-	_shop_owned.text = (
-		"Owned. Your tank is already the bigger one." if owned
-		else "Cost %d credits. You have %d." % [cost, credits]
-	)
-	_buy_button.disabled = owned or credits < cost
+
+	_shop_effect.text = "Tank capacity %d to %d units" % [
+		int(round(capacity)), int(round(capacity * multiplier))
+	]
+	_shop_price.text = "Price %s. You have %s." % [
+		format_credits(cost), format_credits(credits)
+	]
+
+	var button: Dictionary = upgrade_button_state(owned, credits, cost)
+	_buy_button.text = button["text"]
+	_buy_button.disabled = button["disabled"]
+
 	_shop_status.text = status
 	_focus(_shop_back_button if _buy_button.disabled else _buy_button)
+
+
+## The shop button's three states, as a rule rather than as branches buried in a
+## layout function, so what the player is allowed to do can be checked without
+## building a scene. Returns { "text": String, "disabled": bool }.
+##
+## Owned wins over affordability: a player who already owns the upgrade and
+## happens to be short of credits should be told they own it, not that they
+## cannot afford something they already have.
+static func upgrade_button_state(owned: bool, credits: int, cost: int) -> Dictionary:
+	if owned:
+		return {"text": "Owned", "disabled": true}
+	if credits < cost:
+		return {"text": "Not enough credits", "disabled": true}
+	return {"text": "Buy bigger tank", "disabled": false}
+
+
+## The one place credits are turned into words. Everything that shows money
+## calls this, so "350 credits" reads the same on every screen.
+static func format_credits(amount: int) -> String:
+	return "1 credit" if amount == 1 else "%d credits" % amount
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +465,7 @@ func _set_margin_urgent(urgent: bool) -> void:
 
 
 func set_credits(credits: int) -> void:
-	_credits_label.text = "Credits %d" % credits
+	_credits_label.text = format_credits(credits)
 
 
 func set_siren(active: bool) -> void:

@@ -146,6 +146,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
+	# Escape backs out of the shop to the results screen it was opened from. It
+	# must never drop the player into a running game: the shop is only reachable
+	# once a shift is already over, and close_shop() returns to RESULTS, so there
+	# is no path from here into PLAYING.
+	if event.is_action_pressed("pause") and _session.state == GameSession.State.SHOP:
+		_on_close_shop_pressed()
+		get_viewport().set_input_as_handled()
+		return
+
 	if get_tree().paused or _session.state != GameSession.State.PLAYING:
 		return
 
@@ -301,7 +310,9 @@ func _refresh_shop() -> void:
 		_session.get_credits(),
 		_session.has_tank_upgrade(),
 		_session.balance.tank_upgrade_cost,
-		_shop_status
+		_shop_status,
+		_session.balance.tank_capacity,
+		_session.balance.tank_upgrade_multiplier
 	)
 
 
@@ -318,10 +329,16 @@ func _on_session_state_changed(state: int) -> void:
 			_ui.set_prompt("")
 		GameSession.State.RESULTS:
 			_set_paused(false)
+			var calls_pay: int = (
+				_session.completed_calls * _session.balance.credits_per_call
+			)
 			_ui.show_results(
 				_session.last_shift_succeeded,
 				_session.last_shift_reason,
-				_session.credits_earned_this_shift,
+				_session.completed_calls,
+				_session.balance.calls_per_shift,
+				calls_pay,
+				_session.credits_earned_this_shift - calls_pay,
 				_session.get_credits()
 			)
 		GameSession.State.SHOP:

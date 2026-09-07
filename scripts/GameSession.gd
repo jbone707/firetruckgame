@@ -174,7 +174,7 @@ func purchase_tank_upgrade() -> String:
 	if save_manager.tank_upgrade_owned:
 		return "You already own this upgrade"
 	if save_manager.credits < balance.tank_upgrade_cost:
-		return "Not enough credits, you need %d" % balance.tank_upgrade_cost
+		return "Not enough credits, this costs %d credits" % balance.tank_upgrade_cost
 	if not save_manager.purchase_tank_upgrade(balance.tank_upgrade_cost):
 		return "The purchase could not be completed"
 	credits_changed.emit(save_manager.credits)

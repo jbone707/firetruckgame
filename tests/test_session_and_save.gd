@@ -385,3 +385,49 @@ func test_a_good_save_round_trips_and_never_writes_negative_credits() -> void:
 	assert_eq(after.credits, 0, "a negative balance is clamped to zero on write")
 
 	_clear_save_files()
+
+
+## The shop button the player actually sees, alongside the purchase rule above.
+## Three states, each a word rather than a colour, and the button is disabled in
+## two of them rather than hidden: a control that vanishes when you cannot
+## afford it leaves the player wondering whether they missed something.
+func test_the_shop_button_states_match_the_purchase_rule() -> void:
+	var GameUIScript: GDScript = load("res://scripts/GameUI.gd")
+	var cost: int = 200
+
+	var affordable: Dictionary = GameUIScript.upgrade_button_state(false, cost, cost)
+	assert_eq(affordable["text"], "Buy bigger tank", "exactly enough credits can buy")
+	assert_false(affordable["disabled"], "and the button is live")
+
+	var poor: Dictionary = GameUIScript.upgrade_button_state(false, cost - 1, cost)
+	assert_eq(poor["text"], "Not enough credits", "one credit short says so in words")
+	assert_true(poor["disabled"], "and the button is disabled, not hidden")
+
+	var owned: Dictionary = GameUIScript.upgrade_button_state(true, cost * 5, cost)
+	assert_eq(owned["text"], "Owned", "an owned upgrade says owned")
+	assert_true(owned["disabled"], "and cannot be bought again")
+
+	# Owned wins over affordability, so a rich owner is never told they are poor.
+	var owned_and_poor: Dictionary = GameUIScript.upgrade_button_state(true, 0, cost)
+	assert_eq(owned_and_poor["text"], "Owned", "owned beats broke")
+
+	# And the states line up with what GameSession would actually do.
+	var harness: Harness = _make_harness()
+	harness.save.credits = harness.balance.tank_upgrade_cost - 1
+	var refused: String = harness.session.purchase_tank_upgrade()
+	assert_true(
+		GameUIScript.upgrade_button_state(
+			false, harness.save.credits, harness.balance.tank_upgrade_cost
+		)["disabled"],
+		"the button is disabled in exactly the case the session refuses: %s" % refused
+	)
+	harness.destroy()
+	_clear_save_files()
+
+
+## Money reads the same everywhere it is shown.
+func test_credits_are_formatted_the_same_way_on_every_screen() -> void:
+	var GameUIScript: GDScript = load("res://scripts/GameUI.gd")
+	assert_eq(GameUIScript.format_credits(350), "350 credits", "the usual case")
+	assert_eq(GameUIScript.format_credits(0), "0 credits", "nothing earned still reads in credits")
+	assert_eq(GameUIScript.format_credits(1), "1 credit", "and one is singular")
