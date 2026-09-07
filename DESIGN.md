@@ -54,15 +54,27 @@ stream immediately; hydrants refill it.
 
 ## The Map
 
-Part 1 has no map yet, just a placeholder scene that confirms the project
-runs. When map construction begins, the neighborhood will be a small,
-fictional set of blocks with a station, a handful of intersections, multiple
-routes between them, at least three reachable incident buildings, and
-hydrants placed near the roads, including one near the station. The map's
-layout will be stored as data (positions, road centerlines, building
-footprints, hydrant locations) separately from the code that draws and
-simulates it, so a future real-world importer can produce the same kind of
-data without changing how the rest of the game reads it.
+The neighborhood, "Elm Grove", is a small, entirely fictional grid: three
+named streets running east-west (Ash, Birch and Cedar Streets) crossed by
+three running north-south (Elm, Fir and Grove Avenues), forming four blocks
+with real intersections and more than one route between any two points. It
+holds eight buildings, four of them marked as reachable incident candidates,
+and four hydrants placed near the roads, including one close to the
+station. Roads are 140 units wide, wide enough for the truck (about 90 long
+and 40 wide, topping out at 250 units/second) to correct a bad line into a
+turn without clipping a kerb.
+
+The map's layout is stored as data (`MapDefinition`, saved as
+`resources/neighbourhood.tres`) separately from the code that draws and
+simulates it (`MapBuilder`): positions, road centerlines and widths,
+building polygons, station spawn, hydrant locations and incident-candidate
+markers, all with stable ids and all in local world coordinates. A future
+real-world importer only needs to produce another `MapDefinition` in this
+same shape; nothing else in the game would need to change. As of this part,
+`MapBuilder` can construct the neighborhood's visuals and collision (roads
+and sidewalks are decorative only; buildings and the four map-edge walls
+block movement), but it is not yet wired into the playable scene, and there
+is no truck, camera or HUD to view it with yet.
 
 ## Future, Not Implemented
 

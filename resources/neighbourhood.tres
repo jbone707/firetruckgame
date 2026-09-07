@@ -1,0 +1,113 @@
+[gd_resource type="Resource" script_class="MapDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/MapDefinition.gd" id="1_o864j"]
+
+[resource]
+script = ExtResource("1_o864j")
+map_id = "fictional_neighbourhood_v1"
+display_name = "Elm Grove"
+world_bounds = Rect2(0, 0, 1400, 1000)
+station_spawn_position = Vector2(200, 110)
+station_spawn_heading = 1.5707963267948966
+roads = Array[Dictionary]([{
+"id": "r_ash",
+"name": "Ash Street",
+"points": PackedVector2Array(100, 150, 1300, 150),
+"width": 140.0
+}, {
+"id": "r_birch",
+"name": "Birch Street",
+"points": PackedVector2Array(100, 500, 1300, 500),
+"width": 140.0
+}, {
+"id": "r_cedar",
+"name": "Cedar Street",
+"points": PackedVector2Array(100, 850, 1300, 850),
+"width": 140.0
+}, {
+"id": "r_elm",
+"name": "Elm Avenue",
+"points": PackedVector2Array(200, 100, 200, 900),
+"width": 140.0
+}, {
+"id": "r_fir",
+"name": "Fir Avenue",
+"points": PackedVector2Array(700, 100, 700, 900),
+"width": 140.0
+}, {
+"id": "r_grove",
+"name": "Grove Avenue",
+"points": PackedVector2Array(1200, 100, 1200, 900),
+"width": 140.0
+}])
+buildings = Array[Dictionary]([{
+"body_color": Color(0.8, 0.62, 0.45, 1),
+"id": "b_a1",
+"polygon": PackedVector2Array(300, 250, 440, 250, 440, 400, 300, 400),
+"roof_color": Color(0.55, 0.2, 0.2, 1)
+}, {
+"body_color": Color(0.75, 0.75, 0.7, 1),
+"id": "b_a2",
+"polygon": PackedVector2Array(470, 260, 600, 260, 600, 390, 470, 390),
+"roof_color": Color(0.25, 0.35, 0.55, 1)
+}, {
+"body_color": Color(0.85, 0.8, 0.65, 1),
+"id": "b_b1",
+"polygon": PackedVector2Array(800, 250, 940, 250, 940, 400, 800, 400),
+"roof_color": Color(0.35, 0.45, 0.3, 1)
+}, {
+"body_color": Color(0.7, 0.55, 0.45, 1),
+"id": "b_b2",
+"polygon": PackedVector2Array(970, 260, 1100, 260, 1100, 390, 970, 390),
+"roof_color": Color(0.45, 0.25, 0.2, 1)
+}, {
+"body_color": Color(0.78, 0.72, 0.6, 1),
+"id": "b_c1",
+"polygon": PackedVector2Array(300, 600, 440, 600, 440, 750, 300, 750),
+"roof_color": Color(0.3, 0.3, 0.4, 1)
+}, {
+"body_color": Color(0.82, 0.66, 0.5, 1),
+"id": "b_c2",
+"polygon": PackedVector2Array(470, 610, 600, 610, 600, 740, 470, 740),
+"roof_color": Color(0.5, 0.3, 0.25, 1)
+}, {
+"body_color": Color(0.72, 0.78, 0.72, 1),
+"id": "b_d1",
+"polygon": PackedVector2Array(800, 600, 940, 600, 940, 750, 800, 750),
+"roof_color": Color(0.35, 0.5, 0.4, 1)
+}, {
+"body_color": Color(0.76, 0.7, 0.62, 1),
+"id": "b_d2",
+"polygon": PackedVector2Array(970, 610, 1100, 610, 1100, 740, 970, 740),
+"roof_color": Color(0.4, 0.3, 0.55, 1)
+}])
+hydrants = Array[Dictionary]([{
+"id": "h_station",
+"position": Vector2(150, 230)
+}, {
+"id": "h_fir",
+"position": Vector2(780, 300)
+}, {
+"id": "h_grove",
+"position": Vector2(1120, 700)
+}, {
+"id": "h_elm_south",
+"position": Vector2(220, 780)
+}])
+incident_candidates = Array[Dictionary]([{
+"building_id": "b_a1",
+"id": "ic_a1",
+"position": Vector2(370, 235)
+}, {
+"building_id": "b_b2",
+"id": "ic_b2",
+"position": Vector2(1115, 325)
+}, {
+"building_id": "b_c2",
+"id": "ic_c2",
+"position": Vector2(615, 675)
+}, {
+"building_id": "b_d1",
+"id": "ic_d1",
+"position": Vector2(870, 585)
+}])
