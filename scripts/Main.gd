@@ -4,6 +4,7 @@ extends Node2D
 ## This node is the only place that reads keyboard and mouse actions. It
 ## translates them into intent calls on the systems below it, so a later touch
 ## or gamepad layer replaces this file and nothing else (handoff section 8).
+## It also owns the wiring between GameSession, DispatchManager and the UI.
 
 const MAP_RESOURCE_PATH: String = "res://resources/neighbourhood.tres"
 
@@ -13,6 +14,9 @@ const MAP_RESOURCE_PATH: String = "res://resources/neighbourhood.tres"
 @onready var _pause_menu: PauseMenu = %PauseMenu
 @onready var _hydrants_root: Node2D = %Hydrants
 @onready var _incidents_root: Node2D = %Incidents
+@onready var _dispatch: DispatchManager = %Dispatch
+@onready var _session: GameSession = %Session
+@onready var _ui: GameUI = %GameUI
 
 ## Fetched by path rather than by unique name. The % shorthand resolves against
 ## the scene that OWNS the node, and WaterSystem's unique name belongs to
@@ -21,11 +25,8 @@ const MAP_RESOURCE_PATH: String = "res://resources/neighbourhood.tres"
 
 var _map_definition: MapDefinition = null
 var _hydrants: Array[Hydrant] = []
-
-## The prompt the hydrant rules produced this frame, and its progress, read by
-## the HUD in Part 5. Held here rather than pushed, so nothing has to exist yet.
-var hydrant_prompt: int = Hydrant.Prompt.NONE
-var hydrant_prompt_progress: float = 0.0
+var _save: SaveManager = null
+var _shop_status: String = ""
 
 
 func _ready() -> void:
@@ -38,16 +39,50 @@ func _ready() -> void:
 	_map_builder.build(_map_definition)
 	_build_hydrants()
 
-	_truck.global_position = _map_builder.get_station_spawn_position()
-	_truck.rotation = _map_builder.get_station_spawn_heading()
+	_truck.global_position = get_station_spawn_position()
+	_truck.rotation = get_station_spawn_heading()
 
 	_camera.target = _truck
 	_camera.apply_world_bounds(_map_builder.get_world_bounds())
 	_camera.snap_to_target()
 	_camera.make_current()
 
+	_save = SaveManager.new()
+	_save.load_game()
+	if _save.last_load_diagnostic != "":
+		print("Fire Truck Game: %s" % _save.last_load_diagnostic)
+
+	_dispatch.setup(self, _map_builder.get_incident_candidates())
+	_session.setup(self, _dispatch, _truck, _water, _save)
+
 	_pause_menu.resume_requested.connect(_set_paused.bind(false))
 	_pause_menu.return_to_station_requested.connect(_on_return_to_station_requested)
+
+	_ui.start_shift_pressed.connect(_on_start_shift_pressed)
+	_ui.open_shop_pressed.connect(_on_open_shop_pressed)
+	_ui.close_shop_pressed.connect(_on_close_shop_pressed)
+	_ui.buy_upgrade_pressed.connect(_on_buy_upgrade_pressed)
+
+	_session.state_changed.connect(_on_session_state_changed)
+	_session.credits_changed.connect(_ui.set_credits)
+	_dispatch.call_dispatched.connect(_on_call_dispatched)
+	_truck.condition_changed.connect(_ui.set_condition)
+	_water.water_changed.connect(_ui.set_water)
+
+	_ui.set_credits(_session.get_credits())
+	_ui.show_menu()
+
+
+# ---------------------------------------------------------------------------
+# Map access, used by GameSession and DispatchManager
+# ---------------------------------------------------------------------------
+
+func get_station_spawn_position() -> Vector2:
+	return _map_builder.get_station_spawn_position()
+
+
+func get_station_spawn_heading() -> float:
+	return _map_builder.get_station_spawn_heading()
 
 
 func _build_hydrants() -> void:
@@ -63,8 +98,7 @@ func _build_hydrants() -> void:
 		_hydrants.append(hydrant)
 
 
-## Lights a fire on one of the map's incident candidate buildings and returns it.
-## Part 5's DispatchManager calls this; nothing calls it yet.
+## Lights a fire on one of the map's incident candidate buildings.
 func spawn_incident(candidate: Dictionary) -> FireIncident:
 	var building_id: String = String(candidate["building_id"])
 	var polygon: PackedVector2Array = _map_builder.get_building_polygon(building_id)
@@ -79,22 +113,30 @@ func spawn_incident(candidate: Dictionary) -> FireIncident:
 	return incident
 
 
-## Clears every incident and its signal connections. A new shift must not
-## inherit a lost incident's timer or a stale connection (handoff section 9).
+## Frees every incident and, with them, every connection made to one. A new
+## shift must not inherit a lost incident's timer or a stale connection
+## (handoff section 9). remove_child before queue_free so the node is out of the
+## group immediately rather than at the end of the frame, which is what stops a
+## just-cleared incident from being counted by anything later in this frame.
 func clear_incidents() -> void:
 	for child in _incidents_root.get_children():
 		_incidents_root.remove_child(child)
 		child.queue_free()
 
 
+# ---------------------------------------------------------------------------
+# Input
+# ---------------------------------------------------------------------------
+
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("pause"):
+	# Pause only means anything during a shift. On the menus, Escape does
+	# nothing rather than opening a pause overlay over a menu.
+	if event.is_action_pressed("pause") and _session.state == GameSession.State.PLAYING:
 		_set_paused(not get_tree().paused)
 		get_viewport().set_input_as_handled()
 		return
 
-	# Everything below is gameplay input and must not fire while paused.
-	if get_tree().paused:
+	if get_tree().paused or _session.state != GameSession.State.PLAYING:
 		return
 
 	if event.is_action_pressed("toggle_siren"):
@@ -112,7 +154,7 @@ func _physics_process(_delta: float) -> void:
 	# paused, which means this callback also keeps running. The truck itself is
 	# PAUSABLE and frozen, but holding a key while paused must not queue up an
 	# intent that fires the instant the game resumes.
-	if get_tree().paused:
+	if get_tree().paused or _session.state != GameSession.State.PLAYING:
 		return
 
 	var throttle: float = (
@@ -136,6 +178,8 @@ func _physics_process(_delta: float) -> void:
 	_water.set_spray_requested(
 		Input.is_action_pressed("spray") and _water.is_spray_allowed()
 	)
+
+	_update_hud()
 
 
 func _update_hydrants() -> void:
@@ -163,15 +207,115 @@ func _update_hydrants() -> void:
 		if outcome["should_refill"]:
 			wants_refill = true
 
-	hydrant_prompt = best_prompt
-	hydrant_prompt_progress = _water.get_hookup_progress()
-
 	# Leaving range, releasing E, moving off, or filling up all land here as
 	# wants_refill going false, which is the single cancel path.
 	if wants_refill and _water.refill_state == WaterSystem.RefillState.IDLE:
 		_water.begin_hookup()
 	elif not wants_refill and _water.refill_state != WaterSystem.RefillState.IDLE:
 		_water.cancel_refill()
+
+	_ui.set_prompt(_compose_prompt(best_prompt))
+
+
+## One prompt line, chosen by priority. An empty tank is the most urgent thing
+## the player can be told, so it wins over a hydrant prompt.
+func _compose_prompt(hydrant_prompt: int) -> String:
+	if _water.is_empty() and _water.refill_state == WaterSystem.RefillState.IDLE:
+		return "Out of water. Find a hydrant and hold E to refill"
+	var text: String = Hydrant.prompt_text(hydrant_prompt, _water.get_hookup_progress())
+	if text != "":
+		return text
+	return ""
+
+
+func _update_hud() -> void:
+	var incident: FireIncident = _dispatch.active_incident
+	if incident != null and is_instance_valid(incident) and not incident.is_terminal():
+		_ui.set_margin_seconds(incident.get_escalation_remaining())
+		_ui.set_incident_direction(_screen_direction_to(incident.global_position))
+	else:
+		_ui.set_margin_seconds(0.0)
+		_ui.set_incident_direction(Vector2.ZERO)
+
+
+## A unit vector pointing at a world position from the middle of the screen, or
+## zero when that position is comfortably on screen and no arrow is needed.
+func _screen_direction_to(world_position: Vector2) -> Vector2:
+	var viewport_rect: Rect2 = get_viewport_rect()
+	var canvas: Transform2D = get_viewport().get_canvas_transform()
+	var screen_point: Vector2 = canvas * world_position
+
+	var inset: Vector2 = viewport_rect.size * 0.12
+	var visible_rect := Rect2(
+		viewport_rect.position + inset, viewport_rect.size - inset * 2.0
+	)
+	if visible_rect.has_point(screen_point):
+		return Vector2.ZERO
+
+	var from_centre: Vector2 = screen_point - viewport_rect.size * 0.5
+	if from_centre.length_squared() < 1.0:
+		return Vector2.ZERO
+	return from_centre.normalized()
+
+
+# ---------------------------------------------------------------------------
+# Session and UI wiring
+# ---------------------------------------------------------------------------
+
+func _on_start_shift_pressed() -> void:
+	_shop_status = ""
+	_set_paused(false)
+	_session.start_shift()
+
+
+func _on_open_shop_pressed() -> void:
+	_shop_status = ""
+	_session.open_shop()
+
+
+func _on_close_shop_pressed() -> void:
+	_session.close_shop()
+
+
+func _on_buy_upgrade_pressed() -> void:
+	_shop_status = _session.purchase_tank_upgrade()
+	_refresh_shop()
+
+
+func _refresh_shop() -> void:
+	_ui.show_shop(
+		_session.get_credits(),
+		_session.has_tank_upgrade(),
+		_session.balance.tank_upgrade_cost,
+		_shop_status
+	)
+
+
+func _on_session_state_changed(state: int) -> void:
+	match state:
+		GameSession.State.MENU:
+			_ui.show_menu()
+		GameSession.State.PLAYING:
+			_ui.show_playing()
+			_ui.set_condition(_truck.condition, _truck.max_condition)
+			_ui.set_water(_water.water_remaining, _water.tank_capacity)
+			_ui.set_credits(_session.get_credits())
+			_ui.set_siren(_truck.siren_active)
+			_ui.set_prompt("")
+		GameSession.State.RESULTS:
+			_set_paused(false)
+			_ui.show_results(
+				_session.last_shift_succeeded,
+				_session.last_shift_reason,
+				_session.credits_earned_this_shift,
+				_session.get_credits()
+			)
+		GameSession.State.SHOP:
+			_refresh_shop()
+
+
+func _on_call_dispatched(call_number: int, total_calls: int, _incident: FireIncident) -> void:
+	_ui.set_call(call_number, total_calls)
 
 
 func _set_paused(paused: bool) -> void:
@@ -190,14 +334,13 @@ func _set_siren(active: bool) -> void:
 	_truck.set_siren_active(active)
 	var body: TruckBody = _truck.get_node("Body")
 	body.set_siren_active(active)
+	_ui.set_siren(active)
 
 
 func _on_return_to_station_requested() -> void:
 	# Development aid from handoff section 4. Position and motion only: it does
 	# not repair, refill, reset an incident timer, or award credits.
-	_truck.return_to_station(
-		_map_builder.get_station_spawn_position(), _map_builder.get_station_spawn_heading()
-	)
+	_truck.return_to_station(get_station_spawn_position(), get_station_spawn_heading())
 	_water.cancel_refill()
 	_camera.snap_to_target()
 	_set_paused(false)

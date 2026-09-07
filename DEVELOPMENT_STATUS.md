@@ -330,3 +330,36 @@ Both checkers were proven by deliberate failure: removing the world_static bit f
 stream's query mask makes the occlusion check report health 80.0 and exit 1.
 
 Next milestone: Part 5, session, dispatch, HUD, shop and save.
+
+## Part 5: Session, Dispatch, HUD, Shop, Save
+
+Added `scripts/GameSession.gd`, `scripts/DispatchManager.gd`, `scripts/SaveManager.gd`,
+`scripts/GameUI.gd` and `tests/test_session_and_save.gd`, and wired all of it through
+`scripts/Main.gd`.
+
+`GameSession` runs MENU to PLAYING to RESULTS to SHOP. Pause is deliberately not a state:
+it is the engine's own pause, so pausing cannot desync the state machine. Rewards are
+guarded twice over. `FireIncident` guards its terminal transition, and `GameSession` keeps
+a set of incident ids it has already paid for plus a one-shot bonus flag, both cleared only
+by `start_shift()`. Credits are written to disk the moment they are earned, so a shift that
+later fails cannot take them back.
+
+`SaveManager` writes to a temporary file and renames it over the real one, so a crash
+mid-write leaves the previous save intact. On load it validates the schema version, that
+credits are a whole nonnegative number, and that the upgrade flag is a boolean; anything
+else falls back to defaults with a diagnostic rather than an error. JSON has no integer
+type, so a fractional credit balance is rejected rather than silently truncated.
+
+The HUD is built in code so every anchor and container is explicit in one file. Nothing is
+placed at a fixed pixel, and no state is carried by colour alone: every bar has a value
+beside it and every prompt is a sentence.
+
+### A hole in the test harness, found by falling into it
+
+`test_session_and_save.gd` first shipped with a parse error. The suite printed the error
+and still exited 0, because a file that fails to parse comes back from `load()` as a
+GDScript object that simply cannot be instantiated, and the runner skipped it in silence. A
+whole file of checks could stop existing with nothing to say so, which is the one thing a
+runner must never do. `run_tests.gd` now fails on a script it cannot instantiate.
+
+Next milestone: Part 6, verification, self-review and documents.

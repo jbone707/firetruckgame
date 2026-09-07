@@ -39,12 +39,28 @@ func _run_all_tests() -> int:
 	for file_path in test_files:
 		var script: GDScript = load(file_path)
 		if script == null:
-			printerr("FAIL %s: could not load script" % file_path)
+			print("FAIL %s: could not load script" % file_path)
+			failed_methods += 1
+			total_methods += 1
+			continue
+
+		# A test file with a parse error still comes back from load() as a
+		# GDScript object; it is simply not instantiable, and new() returns null.
+		# Without this guard such a file was skipped in silence and the suite
+		# still exited 0, which is the one thing this runner must never do: a
+		# whole file of checks can stop existing and nothing says so.
+		if not script.can_instantiate():
+			print("FAIL %s: script has a parse error and could not be instantiated" % file_path)
 			failed_methods += 1
 			total_methods += 1
 			continue
 
 		var probe = script.new()
+		if probe == null:
+			print("FAIL %s: script could not be instantiated" % file_path)
+			failed_methods += 1
+			total_methods += 1
+			continue
 		var method_names: Array[String] = []
 		for method_info in probe.get_method_list():
 			var method_name: String = method_info["name"]

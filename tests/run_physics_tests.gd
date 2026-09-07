@@ -30,6 +30,7 @@ func _run() -> void:
 	await _check_stream_hits_a_burning_building_from_outside()
 	await _check_an_obstacle_blocks_the_stream()
 	await _check_the_stream_stops_at_its_range()
+	await _check_a_shift_starts_and_dispatches_in_the_real_scene()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -262,5 +263,56 @@ func _check_the_stream_stops_at_its_range() -> void:
 		is_equal_approx(incident.health, health_before),
 		"a fire three times the stream range away takes no damage (health %.1f)" % incident.health
 	)
+	main.queue_free()
+	await physics_frame
+
+
+## Wiring, not rules. The session tests build their objects by hand, so they
+## cannot tell whether Main actually found %Dispatch, %Session and %GameUI, nor
+## whether pressing Start really begins a shift. This boots the real scene and
+## drives it through the same entry point the button uses.
+func _check_a_shift_starts_and_dispatches_in_the_real_scene() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var session: Node = main._session
+
+	_check(session.state == GameSession.State.MENU, "the game opens on the menu")
+
+	main._on_start_shift_pressed()
+	await physics_frame
+
+	_check(session.state == GameSession.State.PLAYING, "starting a shift enters PLAYING")
+	_check(
+		main._dispatch.active_incident != null,
+		"and the first call is dispatched with a live incident"
+	)
+	_check(main._dispatch.call_number == 1, "on call 1")
+	_check(
+		main._dispatch.active_incident.get_escalation_remaining() > 0.0,
+		"with escalation margin still on the clock"
+	)
+
+	# And the whole loop: put out every call and land in results with the bonus.
+	var expected: int = (
+		main._session.balance.credits_per_call * main._session.balance.calls_per_shift
+		+ main._session.balance.shift_completion_bonus
+	)
+	for _call in range(main._session.balance.calls_per_shift):
+		var incident: Node = main._dispatch.active_incident
+		incident.apply_suppression(incident.max_health * 2.0)
+		main._dispatch._confirmation_remaining = 0.0
+		main._dispatch._dispatch_next()
+		await physics_frame
+
+	_check(
+		session.state == GameSession.State.RESULTS,
+		"clearing three calls ends the shift in results"
+	)
+	_check(
+		session.credits_earned_this_shift == expected,
+		"paying three calls and one bonus exactly once (%d of %d)"
+			% [session.credits_earned_this_shift, expected]
+	)
+
 	main.queue_free()
 	await physics_frame
