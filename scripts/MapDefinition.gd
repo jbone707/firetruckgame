@@ -12,9 +12,27 @@ class_name MapDefinition
 ## map of Windsor, California or any other real place (handoff §1, §7).
 
 ## Bumped whenever a field is added, removed or reinterpreted so a loader can
-## detect an old save/resource and migrate or reject it. Version 2 added
-## "blocks" and rescaled the whole neighbourhood.
-@export var schema_version: int = 2
+## detect an old save/resource and migrate or reject it.
+##
+## Version 2 added "blocks" and rescaled the whole neighbourhood.
+##
+## Version 3 is the real-map milestone. Two changes, both of which a version 2
+## resource silently fails to satisfy:
+##
+## 1. Every feature dictionary in "roads", "buildings", "hydrants" and
+##    "incident_candidates" now carries a "source" of either "osm" or
+##    "synthetic", and an "osm_id" which is that feature's OpenStreetMap
+##    identifier or the empty string. A map that mixes real geography with
+##    invented fill has to be able to say which is which, feature by feature,
+##    or the honesty rule in handoff §1 and §7 is unenforceable.
+## 2. "blocks" may now be empty. On a map whose roads are not axis-aligned the
+##    land between them is not a set of rectangles, so MapBuilder derives the
+##    block faces from the road network instead. A non-empty "blocks" is still
+##    honoured, which is how the fictional neighbourhood keeps its hand-built
+##    rectangles.
+const SCHEMA_VERSION: int = 3
+
+@export var schema_version: int = SCHEMA_VERSION
 
 ## Stable machine identifier for this map, e.g. "fictional_neighbourhood_v2".
 @export var map_id: String = ""
@@ -23,15 +41,16 @@ class_name MapDefinition
 ## lists more than one map.
 @export var display_name: String = ""
 
-## Intentionally empty for this fictional map. Present so a future importer
-## that generates a MapDefinition from a real geographic source (handoff §7)
-## can record where its data came from (dataset name, license, fetch date)
-## without changing this schema.
+## Where the data came from: dataset, licence, attribution, download date, and
+## the query and importer that produced this resource. Empty on the fictional
+## neighbourhood, which came from nowhere; filled by tools/import_osm.gd. The
+## Data and Credits screen reads it, so a map carrying real data cannot be
+## shipped without the credit line travelling with it.
 @export var source_metadata: Dictionary = {}
 
-## Intentionally empty for this fictional map, for the same reason as
-## source_metadata: a future real-map importer needs somewhere to record the
-## real-world lat/long box this neighbourhood corresponds to.
+## The real-world latitude/longitude box this map corresponds to, plus the
+## projection constants used to get from it to world units. Empty on the
+## fictional neighbourhood, which corresponds to nowhere.
 @export var geographic_bounds: Dictionary = {}
 
 ## Playable extent, in local world coordinates. Used for camera limits and
@@ -46,12 +65,15 @@ class_name MapDefinition
 @export var station_spawn_heading: float = 0.0
 
 ## Each entry: {id: String, name: String, points: PackedVector2Array,
-## width: float}. "points" is the road's centerline, at least two points.
-## "width" is the full drivable width, from kerb to kerb.
+## width: float, source: String, osm_id: String}. "points" is the road's
+## centerline, at least two points. "width" is the full drivable width, from
+## kerb to kerb. An imported road is one span between two junctions or dead
+## ends and may bend; the road graph is derived from the geometry, so nothing
+## here has to also state what connects to what.
 @export var roads: Array[Dictionary] = []
 
 ## Each entry: {id: String, polygon: PackedVector2Array,
-## body_color: Color, roof_color: Color}.
+## body_color: Color, roof_color: Color, source: String, osm_id: String}.
 @export var buildings: Array[Dictionary] = []
 
 ## The land between the roads. Each entry: {id: String, rect: Rect2,
@@ -59,13 +81,18 @@ class_name MapDefinition
 ## the road pavement together tile the whole neighbourhood with nothing left
 ## over. Everything inside a block is solid, sidewalk and yard and lot alike:
 ## the only drivable surface on the map is road.
+##
+## May be empty (schema version 3). Rectangles can only describe the land
+## between axis-aligned roads, so an imported map leaves this empty and
+## MapBuilder derives the block faces from the road network instead.
 @export var blocks: Array[Dictionary] = []
 
-## Each entry: {id: String, position: Vector2}.
+## Each entry: {id: String, position: Vector2, source: String, osm_id: String}.
 @export var hydrants: Array[Dictionary] = []
 
-## Each entry: {id: String, building_id: String, position: Vector2}.
-## building_id must name an entry in "buildings".
+## Each entry: {id: String, building_id: String, position: Vector2,
+## source: String, osm_id: String}. building_id must name an entry in
+## "buildings".
 @export var incident_candidates: Array[Dictionary] = []
 
 
@@ -120,7 +147,7 @@ static func create_fictional_neighbourhood() -> MapDefinition:
 	const HYDRANT_STANDOFF: float = 0.0
 
 	var def := MapDefinition.new()
-	def.schema_version = 2
+	def.schema_version = SCHEMA_VERSION
 	def.map_id = "fictional_neighbourhood_v2"
 	def.display_name = "Elm Grove"
 	def.source_metadata = {}
@@ -149,6 +176,8 @@ static func create_fictional_neighbourhood() -> MapDefinition:
 				Vector2(street_x0, STREET_Y[index]), Vector2(street_x1, STREET_Y[index]),
 			]),
 			"width": ROAD_WIDTH,
+			"source": "synthetic",
+			"osm_id": "",
 		})
 	for index in range(AVENUE_X.size()):
 		roads.append({
@@ -158,6 +187,8 @@ static func create_fictional_neighbourhood() -> MapDefinition:
 				Vector2(AVENUE_X[index], avenue_y0), Vector2(AVENUE_X[index], avenue_y1),
 			]),
 			"width": ROAD_WIDTH,
+			"source": "synthetic",
+			"osm_id": "",
 		})
 	def.roads = roads
 
@@ -236,6 +267,8 @@ static func create_fictional_neighbourhood() -> MapDefinition:
 						"id": "ic_%d%d_%d" % [row, column, slot],
 						"building_id": house_id,
 						"position": Vector2(x0 + house_width * 0.5, marker_y),
+						"source": "synthetic",
+						"osm_id": "",
 					})
 
 	def.blocks = blocks
@@ -245,13 +278,13 @@ static func create_fictional_neighbourhood() -> MapDefinition:
 	# Hydrants stand at the kerb, spread so no call is a long way from water.
 	# h_station is the one outside the station.
 	def.hydrants = [
-		{"id": "h_station", "position": Vector2(AVENUE_X[0] + HALF_ROAD + HYDRANT_STANDOFF, 700.0)},
-		{"id": "h_ash_fir", "position": Vector2(1700.0, STREET_Y[0] + HALF_ROAD + HYDRANT_STANDOFF)},
-		{"id": "h_birch_west", "position": Vector2(800.0, STREET_Y[1] - HALF_ROAD - HYDRANT_STANDOFF)},
-		{"id": "h_grove_mid", "position": Vector2(AVENUE_X[2] - HALF_ROAD - HYDRANT_STANDOFF, 1500.0)},
-		{"id": "h_cedar_east", "position": Vector2(3000.0, STREET_Y[2] + HALF_ROAD + HYDRANT_STANDOFF)},
-		{"id": "h_dogwood_west", "position": Vector2(900.0, STREET_Y[3] - HALF_ROAD - HYDRANT_STANDOFF)},
-		{"id": "h_hazel_south", "position": Vector2(AVENUE_X[3] - HALF_ROAD - HYDRANT_STANDOFF, 2300.0)},
+		{"id": "h_station", "position": Vector2(AVENUE_X[0] + HALF_ROAD + HYDRANT_STANDOFF, 700.0), "source": "synthetic", "osm_id": ""},
+		{"id": "h_ash_fir", "position": Vector2(1700.0, STREET_Y[0] + HALF_ROAD + HYDRANT_STANDOFF), "source": "synthetic", "osm_id": ""},
+		{"id": "h_birch_west", "position": Vector2(800.0, STREET_Y[1] - HALF_ROAD - HYDRANT_STANDOFF), "source": "synthetic", "osm_id": ""},
+		{"id": "h_grove_mid", "position": Vector2(AVENUE_X[2] - HALF_ROAD - HYDRANT_STANDOFF, 1500.0), "source": "synthetic", "osm_id": ""},
+		{"id": "h_cedar_east", "position": Vector2(3000.0, STREET_Y[2] + HALF_ROAD + HYDRANT_STANDOFF), "source": "synthetic", "osm_id": ""},
+		{"id": "h_dogwood_west", "position": Vector2(900.0, STREET_Y[3] - HALF_ROAD - HYDRANT_STANDOFF), "source": "synthetic", "osm_id": ""},
+		{"id": "h_hazel_south", "position": Vector2(AVENUE_X[3] - HALF_ROAD - HYDRANT_STANDOFF, 2300.0), "source": "synthetic", "osm_id": ""},
 	]
 
 	return def
@@ -302,4 +335,6 @@ static func _building(id: String, x0: float, y0: float, x1: float, y1: float, bo
 		]),
 		"body_color": body_color,
 		"roof_color": roof_color,
+		"source": "synthetic",
+		"osm_id": "",
 	}
