@@ -1,0 +1,8 @@
+# Godot's local import cache; regenerated automatically on open.
+.godot/
+
+# Stray temp files from editors and tools.
+*.tmp
+
+# Export presets can end up carrying signing paths or keystore locations.
+export_presets.cfg
