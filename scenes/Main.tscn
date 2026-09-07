@@ -1,6 +1,28 @@
-[gd_scene load_steps=2 format=3 uid="uid://c0p1acehol4wp"]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/Truck.tscn" id="2_truck"]
+[ext_resource type="PackedScene" path="res://scenes/PauseMenu.tscn" id="3_pause"]
+[ext_resource type="Script" path="res://scripts/MapBuilder.gd" id="4_map"]
+[ext_resource type="Script" path="res://scripts/FollowCamera.gd" id="5_camera"]
 
 [node name="Main" type="Node2D"]
+process_mode = 3
 script = ExtResource("1_main")
+
+[node name="MapBuilder" type="Node2D" parent="."]
+unique_name_in_owner = true
+process_mode = 1
+script = ExtResource("4_map")
+
+[node name="Truck" parent="." instance=ExtResource("2_truck")]
+unique_name_in_owner = true
+process_mode = 1
+
+[node name="Camera" type="Camera2D" parent="."]
+unique_name_in_owner = true
+process_mode = 1
+script = ExtResource("5_camera")
+
+[node name="PauseMenu" parent="." instance=ExtResource("3_pause")]
+unique_name_in_owner = true

@@ -246,3 +246,50 @@ Part 3: TruckController and the real Main/GameSession scene, per handoff
 §4 and §8. Spawn the truck at `MapBuilder.get_station_spawn_position()`/
 `get_station_spawn_heading()`, drive it against the layer-1 collision this
 part built, and bound the camera to `get_world_bounds()`.
+
+## Part 3: Truck, Camera, Collision
+
+Added `scripts/TruckController.gd`, `scripts/TruckBody.gd`, `scripts/FollowCamera.gd`,
+`scripts/PauseMenu.gd`, `scenes/Truck.tscn`, `scenes/PauseMenu.tscn`, a rewritten
+`scenes/Main.tscn` and `scripts/Main.gd`, plus `tests/test_truck_damage.gd` and a second
+runner, `tests/run_physics_tests.gd`.
+
+Orientation convention: local +X is forward, so `rotation` 0 points right. Steering is
+heading relative, has no authority at a standstill, reaches full authority at 40 units/s,
+is reduced again toward top speed, and reverses its sense when the truck is backing up.
+There is no lateral slip: the truck goes where it is pointed, which is a deliberate arcade
+choice for predictability.
+
+The camera is a sibling of the truck, not a child of it. Parenting it would inherit the
+truck's rotation and spin the world, so following by position is what keeps it north up.
+It is bounded to the map's world bounds and leads slightly in the direction of travel.
+
+### The bug the unit tests could not see
+
+The first version of `TruckController` trusted `move_and_slide()` to write the blocked
+result back into `velocity`. In this build it does not. Driving flat out into a wall left
+`velocity` reading 250 units/second frame after frame while `get_real_velocity()` correctly
+read zero, so the drive code believed the truck was still doing 250 into a wall it had
+already stopped against, and the crash re-fired every time the 0.5 second contact cooldown
+expired. Ten full speed impacts, engine destroyed, from one collision. Every unit test
+passed throughout, because they exercise the damage rule and never step Godot's physics.
+
+The fix is one line: `velocity = get_real_velocity()` after `move_and_slide()`, so the
+controller adopts the motion that actually happened. `tests/run_physics_tests.gd` exists to
+cover this class of defect and was proven by removing the fix again: it reports "got 10"
+and exits 1, while `tests/run_tests.gd` stays green at exit 0.
+
+`collision_damage_scale` was lowered from 0.6 to 0.3 after measuring a real crash. A wall
+strike at top speed registers about 200 units/second into the normal, which at 0.6 cost 85
+of the 100 starting condition and made a single mistake effectively fatal. At 0.3 it costs
+about 42.
+
+### Two runners, two commands
+
+    godot --headless --path . --script res://tests/run_tests.gd
+    godot --headless --path . --script res://tests/run_physics_tests.gd
+
+The first is fast and covers rules. The second boots the real main scene and steps physics,
+so it is slower and covers integration. Both exit nonzero on any failure.
+
+Next milestone: Part 4, water, fire and hydrants.

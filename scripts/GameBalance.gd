@@ -54,7 +54,12 @@ var high_speed_steering_factor: float = 0.45 # invented default, not from handof
 var collision_damage_threshold: float = 60.0 # invented default, not from handoff
 
 ## Damage dealt per world unit/second of impact speed above the threshold.
-var collision_damage_scale: float = 0.6 # invented default, not from handoff
+## Measured against the real thing rather than guessed: a flat-out crash into a
+## wall registers about 200 units/second into the normal, so this deals roughly
+## 42 of the 100 starting condition. A top speed crash is meant to hurt badly
+## without ending the shift outright. At the first draft's 0.6 a single wall
+## strike took 85 condition, which made one mistake effectively fatal.
+var collision_damage_scale: float = 0.3 # invented default, not from handoff
 
 ## Minimum time, in seconds, between damage applications from the same
 ## resting contact so leaning on a wall does not deduct damage every frame.
