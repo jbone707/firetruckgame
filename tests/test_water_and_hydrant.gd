@@ -128,7 +128,8 @@ func test_spraying_is_blocked_while_refilling_and_refill_has_priority() -> void:
 	water.begin_hookup()
 	assert_false(water.is_spray_allowed(), "spraying is blocked during hookup")
 
-	# Through the hookup delay and into refilling proper.
+	# Through the hookup delay and into refilling proper. Every count below is
+	# derived from GameBalance, so these prove the rule and not the numbers.
 	for _tick in range(int(water.balance.hydrant_hookup_time / FRAME_DELTA) + 2):
 		water._update_refill(FRAME_DELTA)
 	assert_eq(water.refill_state, WaterSystem.RefillState.REFILLING, "hookup completes into refill")
@@ -148,7 +149,7 @@ func test_refill_fills_at_the_specified_rate_and_stops_at_capacity() -> void:
 	water.water_remaining = 0.0
 
 	water.begin_hookup()
-	# Hookup first: nothing arrives during the two second delay.
+	# Hookup first: nothing arrives during the hookup delay, whatever it is set to.
 	for _tick in range(int(balance.hydrant_hookup_time / FRAME_DELTA) - 2):
 		water._update_refill(FRAME_DELTA)
 	assert_eq(water.water_remaining, 0.0, "no water arrives before the hookup completes")
@@ -357,4 +358,41 @@ func test_hitting_is_false_against_a_fire_that_is_already_out() -> void:
 	assert_false(water.is_suppressing(), "spraying a fire that is already out is not suppressing")
 
 	fire.free()
+	_destroy(water)
+
+
+## The timing target itself (Part 4). The rules above are deliberately written
+## against whatever GameBalance says; this one pins what GameBalance is meant to
+## say, because "a full tank in about three seconds from hookup" is a design
+## decision made at a playtest and not something the other tests can see. If it
+## is retuned on purpose, this is the assertion to change, on purpose.
+func test_a_full_tank_takes_about_three_seconds_from_hookup() -> void:
+	var water: WaterSystem = _make_water()
+	var balance: Node = water.balance
+	water.water_remaining = 0.0
+
+	var expected: float = balance.hydrant_hookup_time + balance.tank_capacity / balance.hydrant_refill_rate
+	assert_true(
+		expected >= 2.0 and expected <= 4.0,
+		"hookup plus a full fill should be about three seconds, calculated %.2f" % expected
+	)
+
+	water.begin_hookup()
+	var elapsed: float = 0.0
+	# A generous ceiling, so a badly wrong value fails on the assertion below
+	# rather than by hanging the runner.
+	for _tick in range(int(20.0 / FRAME_DELTA)):
+		if water.water_remaining >= water.tank_capacity:
+			break
+		water._update_refill(FRAME_DELTA)
+		elapsed += FRAME_DELTA
+
+	assert_true(
+		water.water_remaining >= water.tank_capacity,
+		"the tank does fill (%.1f of %.1f)" % [water.water_remaining, water.tank_capacity]
+	)
+	assert_almost_eq(
+		elapsed, expected, 0.05,
+		"an empty tank fills in the time the balance values say it should"
+	)
 	_destroy(water)

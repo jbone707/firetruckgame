@@ -105,12 +105,19 @@ var fire_escalation_duration: float = 120.0
 # Hydrants (handoff §6)
 # ---------------------------------------------------------------------------
 
-## Seconds a held hookup takes before refilling begins. Specified by handoff §6.
-var hydrant_hookup_time: float = 2.0
+## Seconds a held hookup takes before refilling begins. Handoff §6 specified 2.0;
+## halved after James playtested the first build and found filling the tank slow
+## enough to be dead time rather than a decision. See hydrant_refill_rate.
+var hydrant_hookup_time: float = 1.0
 
-## Refill rate once hooked up, water units/second, up to tank capacity.
-## Specified by handoff §6.
-var hydrant_refill_rate: float = 25.0
+## Refill rate once hooked up, water units/second, up to tank capacity. Handoff
+## §6 specified 25.0, which took four seconds on top of the hookup to fill a
+## 100 unit tank. Doubled for the same playtest reason: one second of hookup
+## plus two seconds of filling is about three seconds for a full tank, which is
+## long enough to be a choice and short enough not to be a wait. The rules
+## around it are untouched: nearly stationary to hook up, any movement cancels,
+## and refilling still wins over spraying.
+var hydrant_refill_rate: float = 50.0
 
 ## Speed, world units/second, at or below which the truck counts as "nearly
 ## stationary" for hookup purposes.
