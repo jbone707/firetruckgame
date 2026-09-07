@@ -291,3 +291,70 @@ func test_hydrant_refuses_a_moving_truck_and_prompts_in_words() -> void:
 	assert_eq(Hydrant.prompt_text(Hydrant.Prompt.NONE, 0.0), "", "no prompt when there is nothing to say")
 
 	_destroy(hydrant)
+
+
+## The one flag every piece of suppression feedback hangs off (Part 3): the
+## steam burst, the shrinking flames' companion HUD line, and the "Knocking it
+## down" prompt all read is_suppressing(). It has to mean "this tick actually
+## took health off a fire", not "the trigger is held", or the game would tell
+## the player the stream is working while they hose a wall.
+func test_hitting_is_true_only_on_ticks_that_actually_suppressed() -> void:
+	var water: WaterSystem = _make_water()
+	var spy := SuppressionSpy.new()
+
+	assert_false(water.is_suppressing(), "a tank that has not sprayed is not suppressing")
+
+	water.apply_spray_tick(FRAME_DELTA, spy)
+	assert_true(water.is_suppressing(), "a tick that lands on a fire is suppressing")
+	assert_true(spy.total > 0.0, "and the fire was given a positive amount (%.3f)" % spy.total)
+
+	# A miss: water still leaves the tank, and nothing is being put out.
+	var before: float = water.water_remaining
+	water.apply_spray_tick(FRAME_DELTA, null)
+	assert_false(water.is_suppressing(), "a tick that hits nothing is not suppressing")
+	assert_true(
+		water.water_remaining < before,
+		"but the miss still cost the tank (%.3f to %.3f)" % [before, water.water_remaining]
+	)
+
+	# A wall: something was hit, but it is not a fire and cannot absorb anything.
+	water.apply_spray_tick(FRAME_DELTA, RefCounted.new())
+	assert_false(water.is_suppressing(), "a tick that hits a wall is not suppressing")
+
+	_destroy(water)
+
+
+func test_hitting_is_false_at_an_empty_tank() -> void:
+	var water: WaterSystem = _make_water()
+	var spy := SuppressionSpy.new()
+
+	water.apply_spray_tick(FRAME_DELTA, spy)
+	assert_true(water.is_suppressing(), "full tank, on target, suppressing")
+
+	water.water_remaining = 0.0
+	water.apply_spray_tick(FRAME_DELTA, spy)
+	assert_false(water.is_suppressing(), "an empty tank on target is not suppressing")
+
+	var calls_before: int = spy.calls
+	water.apply_spray_tick(FRAME_DELTA, spy)
+	assert_eq(spy.calls, calls_before, "and the fire is not asked to absorb anything")
+
+	_destroy(water)
+
+
+## A fire that is already out returns zero from apply_suppression, and the flag
+## has to follow the fire's answer rather than the request.
+func test_hitting_is_false_against_a_fire_that_is_already_out() -> void:
+	var water: WaterSystem = _make_water()
+	var fire: FireIncident = FireIncidentScript.new()
+	fire.balance = water.balance
+	fire.health = 0.0
+	fire.max_health = 100.0
+	fire.escalation_limit = 120.0
+	fire._terminal = true
+
+	water.apply_spray_tick(FRAME_DELTA, fire)
+	assert_false(water.is_suppressing(), "spraying a fire that is already out is not suppressing")
+
+	fire.free()
+	_destroy(water)

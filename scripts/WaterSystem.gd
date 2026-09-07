@@ -18,6 +18,11 @@ enum RefillState { IDLE, HOOKING_UP, REFILLING }
 ## aim at this scale, so the query is a short circle swept along the aim line.
 const STREAM_QUERY_RADIUS: float = 6.0
 
+## Circles drawn in the steam burst when the stream is landing on a fire.
+## Deliberately few: handoff section 5 caps the effect budget and forbids
+## anything that obscures the target.
+const STEAM_PUFFS: int = 8
+
 var balance: Node = null
 
 var water_remaining: float = 0.0
@@ -34,8 +39,16 @@ var aim_world_position: Vector2 = Vector2.ZERO
 var _impact_point: Vector2 = Vector2.ZERO
 var _has_impact: bool = false
 var _stream_active: bool = false
+
+## Whether the tick just processed actually put suppression into a fire. False
+## on a miss, false against a wall, false at an empty tank, and false against a
+## fire that is already out. Everything the player sees that says "this is
+## working" hangs off this one flag (handoff section 5).
+var _suppressing: bool = false
+
 var _empty_announced: bool = false
 var _hookup_elapsed: float = 0.0
+var _steam_phase: float = 0.0
 
 @onready var _truck: TruckController = get_parent() as TruckController
 
@@ -114,11 +127,17 @@ func is_stream_active() -> bool:
 	return _stream_active
 
 
+## True only while the stream is landing on a fire and taking health off it.
+func is_suppressing() -> bool:
+	return _suppressing
+
+
 ## One tick of spraying. Consumes water first, then applies suppression scaled
 ## by what was actually consumed, so the final partial tick before the tank runs
 ## dry does a proportionally smaller amount of work rather than a full tick's
 ## worth. Returns the water consumed.
 func apply_spray_tick(delta: float, target: Object) -> float:
+	_suppressing = false
 	var consumed: float = consume_water(balance.spray_flow_rate * delta)
 	if consumed <= 0.0:
 		if not _empty_announced:
@@ -126,7 +145,15 @@ func apply_spray_tick(delta: float, target: Object) -> float:
 			refill_required.emit()
 		return 0.0
 	if target != null and target.has_method("apply_suppression"):
-		target.apply_suppression(consumed * balance.suppression_per_water_unit)
+		# The fire's own answer, not the request: it returns what it actually
+		# absorbed, which is zero once it is out or already terminal. Reading
+		# the answer rather than assuming it is what makes "hitting" mean
+		# hitting, so the steam and the HUD line cannot appear over a fire that
+		# is doing nothing.
+		var absorbed: float = target.apply_suppression(
+			consumed * balance.suppression_per_water_unit
+		)
+		_suppressing = absorbed > 0.0
 	return consumed
 
 
@@ -138,11 +165,14 @@ func _physics_process(delta: float) -> void:
 	_update_turret_aim()
 	_update_refill(delta)
 
+	_steam_phase += delta
+
 	var wants_stream: bool = spray_requested and is_spray_allowed() and not is_empty()
 	if not wants_stream:
 		if spray_requested and is_empty() and not _empty_announced:
 			_empty_announced = true
 			refill_required.emit()
+		_suppressing = false
 		if _stream_active:
 			_stream_active = false
 			queue_redraw()
@@ -262,6 +292,24 @@ func _draw() -> void:
 	var tip: Vector2 = Vector2(length, 0.0)
 	draw_line(Vector2(18.0, 0.0), tip, Color(0.55, 0.8, 1.0, 0.85), 7.0)
 	draw_line(Vector2(18.0, 0.0), tip, Color(0.9, 0.97, 1.0, 0.7), 3.0)
-	if _has_impact:
+	if not _has_impact:
+		return
+
+	if not _suppressing:
+		# A miss, or a wall: water, and only water.
 		draw_circle(tip, 9.0, Color(0.8, 0.93, 1.0, 0.5))
 		draw_circle(tip, 4.0, Color(1.0, 1.0, 1.0, 0.7))
+		return
+
+	# Landing on a fire: the water flashes off as steam. Dense, white and
+	# clearly bigger than the plain splash, because this is the one moment the
+	# player needs to be sure the stream is doing something. Kept to eight
+	# circles and no smoke, inside handoff section 5's effect budget, and
+	# nowhere near the HUD: it is drawn at the nozzle's target in the world.
+	for index in range(STEAM_PUFFS):
+		var swirl: float = _steam_phase * 3.2 + float(index) * (TAU / float(STEAM_PUFFS))
+		var spread: float = 7.0 + fmod(_steam_phase * 26.0 + float(index) * 5.0, 20.0)
+		var puff: Vector2 = tip + Vector2(cos(swirl), sin(swirl)) * spread
+		var fade: float = 1.0 - spread / 34.0
+		draw_circle(puff, 5.0 + spread * 0.32, Color(1.0, 1.0, 1.0, 0.36 * fade))
+	draw_circle(tip, 10.0, Color(1.0, 1.0, 1.0, 0.85))

@@ -32,6 +32,9 @@ const MARKER_HEIGHT: float = 62.0
 ## as the same indicator.
 const MARKER_COLOR: Color = Color(1.0, 0.55, 0.2, 0.95)
 
+## The fire health bar drawn over the active call, world units.
+const BAR_SIZE: Vector2 = Vector2(84.0, 9.0)
+
 var balance: Node = null
 
 var incident_id: String = ""
@@ -205,7 +208,14 @@ func _draw() -> void:
 	var urgency: float = get_escalation_ratio()
 	var base_size: float = lerpf(6.0, 15.0, health_ratio)
 
-	for index in range(_flame_seeds.size()):
+	# Flames go out as well as shrink. A half extinguished fire showing all
+	# seven flames at nine tenths the size reads as "nothing is happening";
+	# losing flames one at a time is the difference a player can actually see
+	# from the street. Never below one while the fire is alive, so a fire on its
+	# last few points of health is still visibly a fire.
+	var lit: int = maxi(1, int(ceil(float(_flame_seeds.size()) * health_ratio)))
+
+	for index in range(lit):
 		var seed_point: Vector2 = to_local(_flame_seeds[index])
 		var flicker: float = sin(_flame_phase * 6.0 + float(index) * 1.7) * 0.18 + 1.0
 		var size: float = base_size * flicker
@@ -216,6 +226,7 @@ func _draw() -> void:
 
 	if _is_active_call:
 		_draw_destination_marker()
+		_draw_health_bar(health_ratio)
 
 
 ## A chevron hanging over the burning building: the on-screen half of the pair
@@ -233,4 +244,29 @@ func _draw_destination_marker() -> void:
 		PackedVector2Array([body[0], body[1], body[2], body[0]]),
 		Color(0.1, 0.06, 0.02, 0.9),
 		2.0
+	)
+
+
+## How much fire is left, over the building, and only for the call the player
+## has been sent to. Shown as a bar AND as a percentage, because a bar alone
+## carries its meaning in length and colour and this game does not let colour be
+## the only carrier (handoff section 6).
+func _draw_health_bar(health_ratio: float) -> void:
+	var origin := Vector2(-BAR_SIZE.x * 0.5, -MARKER_HEIGHT - 46.0)
+	var full := Rect2(origin, BAR_SIZE)
+
+	draw_rect(full.grow(2.0), Color(0.06, 0.05, 0.05, 0.75))
+	draw_rect(full, Color(0.22, 0.20, 0.20, 0.9))
+	draw_rect(
+		Rect2(origin, Vector2(BAR_SIZE.x * health_ratio, BAR_SIZE.y)),
+		Color(0.95, 0.45, 0.15, 0.95)
+	)
+	draw_string(
+		ThemeDB.fallback_font,
+		origin + Vector2(BAR_SIZE.x + 8.0, BAR_SIZE.y),
+		"%d%%" % int(round(health_ratio * 100.0)),
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1.0,
+		14,
+		Color(1.0, 0.92, 0.82, 0.95)
 	)

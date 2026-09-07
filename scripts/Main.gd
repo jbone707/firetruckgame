@@ -225,6 +225,12 @@ func _compose_prompt(hydrant_prompt: int) -> String:
 	var text: String = Hydrant.prompt_text(hydrant_prompt, _water.get_hookup_progress())
 	if text != "":
 		return text
+	# Below the two refill messages, above nothing: confirmation that the stream
+	# is actually taking health off the fire rather than washing a wall. Driven
+	# by the same flag the steam burst is, so the line and the picture can never
+	# disagree.
+	if _water.is_suppressing():
+		return "Knocking it down"
 	return ""
 
 
