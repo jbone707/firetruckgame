@@ -39,8 +39,16 @@ yourself. All of that is already in the project files.
 
 ## A Few Things Worth Knowing
 
-- Water is spent whether or not the stream connects, so aiming matters.
+- Water is spent whether or not the stream connects, so aiming matters. When the
+  stream is actually taking health off the fire it flashes into white steam, the
+  flames start going out, and the HUD says "Knocking it down". Plain water and no
+  line means you are missing.
 - A wall between the nozzle and the fire blocks the stream.
+- Roads are the only place you can drive. Sidewalks, gardens and lots all stop
+  the engine, so getting there means taking the streets.
+- Refilling takes about three seconds from the moment the hookup starts.
+- When the call is off screen an arrow at the edge of the screen points to it.
+  When it is on screen the arrow goes and a marker hangs over the building.
 - Crashing hurts, and a flat-out crash hurts a lot. The engine going out of
   service ends the shift.
 - Each call you clear banks 100 credits immediately. If the shift later fails you

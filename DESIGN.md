@@ -50,19 +50,46 @@ A fire has two separate values: its health, which drops while it is hit
 directly and reaches zero when it is put out, and its escalation, which
 climbs on its own from the moment it is dispatched until it either gets
 extinguished or reaches the loss threshold. Running the tank dry stops the
-stream immediately; hydrants refill it.
+stream immediately; a hydrant takes a second to hook up and then fills at 50
+units a second, so a full tank is about three seconds from the moment the
+hookup begins.
+
+You can see the stream working. While it is actually taking health off a fire
+the impact turns into a dense white steam burst, the flames go out one at a
+time as the fire's health falls, a health bar with its percentage sits over
+the building, and the HUD says "Knocking it down". Miss, or hit a wall, and it
+is plain water and no line: the feedback follows what the fire absorbed, not
+what the trigger asked for.
+
+Away from the call, an arrow at the edge of the screen points at the fire
+along the line from the middle of the screen, and disappears the moment the
+fire itself is on screen, where a marker hangs over the burning building
+instead.
 
 ## The Map
 
-The neighborhood, "Elm Grove", is a small, entirely fictional grid: three
-named streets running east-west (Ash, Birch and Cedar Streets) crossed by
-three running north-south (Elm, Fir and Grove Avenues), forming four blocks
-with real intersections and more than one route between any two points. It
-holds eight buildings, four of them marked as reachable incident candidates,
-and four hydrants placed near the roads, including one close to the
-station. Roads are 140 units wide, wide enough for the truck (about 90 long
-and 40 wide, topping out at 250 units/second) to correct a bad line into a
-turn without clipping a kerb.
+The neighbourhood, "Elm Grove", is an entirely fictional grid 4000 by 3000
+units across: four named streets running east-west (Ash, Birch, Cedar and
+Dogwood Streets) crossed by four running north-south (Elm, Fir, Grove and
+Hazel Avenues), forming sixteen real intersections and nine blocks, with more
+than one route between any two points. It holds 36 houses, six of them marked
+as reachable incident candidates, and seven hydrants at the kerb, including
+one outside the station.
+
+Roads are 280 units wide, kerb to kerb: two lanes and shoulders, a little over
+three lengths of the truck (about 90 long and 40 wide, topping out at 250
+units/second). At the camera's zoom a road spans about a fifth of the screen
+and the player sees roughly a third of the map's width at a time, so a street
+reads as a street rather than as a line drawn on a field.
+
+The land between the roads is filled and solid. Each block is a concrete
+sidewalk band around a garden, with houses on lots facing the streets, and
+all of it stops the truck: the only drivable surface on the map is road.
+Blocks tile the whole neighbourhood, verges at the boundary included, so
+there is no open ground anywhere to cut a corner across. Their collision sits
+on its own physics layer, which the truck collides with and the water stream
+passes through, because a stream clears a fence and a front lawn and does not
+clear a house.
 
 The map's layout is stored as data (`MapDefinition`, saved as
 `resources/neighbourhood.tres`) separately from the code that draws and
@@ -70,11 +97,11 @@ simulates it (`MapBuilder`): positions, road centerlines and widths,
 building polygons, station spawn, hydrant locations and incident-candidate
 markers, all with stable ids and all in local world coordinates. A future
 real-world importer only needs to produce another `MapDefinition` in this
-same shape; nothing else in the game would need to change. As of this part,
-`MapBuilder` can construct the neighborhood's visuals and collision (roads
-and sidewalks are decorative only; buildings and the four map-edge walls
-block movement), but it is not yet wired into the playable scene, and there
-is no truck, camera or HUD to view it with yet.
+same shape; nothing else in the game would need to change. `MapBuilder` builds
+the whole thing: the road network as one continuous dark asphalt surface with
+no seam at any junction, kerb lines and a dashed centre line, the blocks with
+their sidewalks and gardens, the houses with contrasting roofs, and the four
+map-edge walls.
 
 ## What Is Actually Built
 
