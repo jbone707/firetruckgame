@@ -476,17 +476,30 @@ func _check_an_empty_lot_stops_the_truck() -> void:
 		await physics_frame
 		deepest_x = maxf(deepest_x, truck.global_position.x)
 
-	# The truck is 90 long, so its centre stops about 45 short of the kerb it is
-	# pressed against. Anything past the kerb line means it drove onto the lot.
+	# Measured at the bumper, not the centre: the truck is 90 long and pointing
+	# due east, so its nose is 45 ahead of its own position.
+	var deepest_nose: float = deepest_x + truck.get_collision_half_extents().x
+	var kerb: float = lot.position.x
+	var fence: float = kerb + MapBuilder.SIDEWALK_WIDTH
+
 	_check(
 		deepest_x > start_x + 20.0,
 		"the truck actually set off toward the lot (reached x %.1f from %.1f)"
 			% [deepest_x, start_x]
 	)
+
+	# Since sidewalks became drivable the kerb is no longer where this stops.
+	# Mounting it is allowed and free; the garden fence 34 units further in is
+	# the edge that holds.
 	_check(
-		deepest_x < lot.position.x,
-		"four seconds of throttle at an empty lot never crosses its kerb"
-			+ " (deepest x %.1f, kerb at %.1f)" % [deepest_x, lot.position.x]
+		deepest_nose > kerb,
+		"the truck can mount the kerb onto the sidewalk (nose reached %.1f, kerb at %.1f)"
+			% [deepest_nose, kerb]
+	)
+	_check(
+		deepest_nose <= fence + 1.0,
+		"four seconds of throttle at an empty lot stops at the garden fence"
+			+ " (nose %.1f, fence at %.1f, centre %.1f)" % [deepest_nose, fence, deepest_x]
 	)
 
 	main.queue_free()

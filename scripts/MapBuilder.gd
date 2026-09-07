@@ -2,16 +2,17 @@ extends Node2D
 class_name MapBuilder
 ## Constructs the playable scene from a MapDefinition (handoff §7, §8).
 ##
-## Roads, street name labels and hydrant/incident markers are purely visual and
-## carry no collision shape at all. Buildings and the four map-edge walls get
-## collision on physics layer 1 ("world_static"), mask 0, which both stops the
-## truck and blocks the water stream. Blocks, the filled land between the roads,
-## get collision on layer 5 ("world_lot"): solid to the truck, transparent to
-## the stream. Clean retro-inspired shapes, built-in drawing (Polygon2D/Line2D)
-## and built-in fonts only, no external assets.
+## Roads, sidewalks, street name labels and hydrant/incident markers are purely
+## visual and carry no collision shape at all. Buildings and the four map-edge
+## walls get collision on physics layer 1 ("world_static"), mask 0, which both
+## stops the truck and blocks the water stream. A block's GARDEN, the part
+## behind the fence, gets collision on layer 5 ("world_lot"): solid to the truck,
+## transparent to the stream. Clean retro-inspired shapes, built-in drawing
+## (Polygon2D/Line2D) and built-in fonts only, no external assets.
 ##
-## The whole map is therefore tiled: road pavement, or block. Nothing between
-## the two is drivable.
+## Drivable: road, and the sidewalk band around every block. Not drivable: the
+## gardens inside the fences, and the houses on them. The kerb is a line the
+## player can cross; the fence is the one they cannot.
 
 ## Warm, near-black asphalt (Part 2). Every road, and every junction where two
 ## roads cross, is filled with this exact colour and nothing else, which is
@@ -41,16 +42,21 @@ const SIDEWALK_WIDTH: float = 34.0
 const KERB_WIDTH: float = 5.0
 const CENTERLINE_WIDTH: float = 6.0
 
+## The garden fence: where a block stops being drivable. Since sidewalks became
+## drivable this, and not the kerb, is the edge that stops the truck.
+const FENCE_WIDTH: float = 4.0
+const FENCE_COLOR: Color = Color(0.42, 0.36, 0.28, 0.95)
+
 ## Dash pattern for the centreline, world units along the road.
 const DASH_LENGTH: float = 44.0
 const DASH_GAP: float = 32.0
 
-## The physics layer everything that is not a building sits on inside a block:
-## sidewalk, garden, fence, kerb. It stops the truck, exactly as a building
-## does, but it is deliberately absent from WaterSystem's stream mask, because a
-## stream clears a fence and a front lawn and does not clear a house. Without
-## that split, filling the blocks in would have made every fire on the map
-## unreachable from the street it faces.
+## The physics layer a block's garden sits on, behind its fence. It stops the
+## truck, exactly as a building does, but it is deliberately absent from
+## WaterSystem's stream mask, because a stream clears a fence and a front lawn
+## and does not clear a house. Without that split, filling the blocks in would
+## have made every fire on the map unreachable from the street it faces. That
+## decision stands; only the sidewalk came back out of it.
 const LOT_LAYER: int = 0b10000  # layer 5, world_lot
 const ROOF_INSET_SCALE: float = 0.62
 const WALL_THICKNESS: float = 40.0
@@ -64,16 +70,18 @@ const LABEL_COLOR: Color = Color(0.95, 0.95, 0.90)
 ## resolves to concrete, not tarmac; the kerb is drawn last of the ground
 ## layers so it sits cleanly on top of that seam, which is the one edge in
 ## the whole scene that is *supposed* to show, being the line between
-## drivable and not.
+## drivable and not. The fence, one step above it, is where collision actually
+## begins now that the sidewalk is drivable.
 const Z_ROAD: int = 0
 const Z_ROAD_MARKING: int = 1
 const Z_SIDEWALK: int = 2
 const Z_YARD: int = 3
 const Z_KERB: int = 4
-const Z_BUILDING_BODY: int = 5
-const Z_BUILDING_ROOF: int = 6
-const Z_LABEL: int = 7
-const Z_MARKER: int = 8
+const Z_FENCE: int = 5
+const Z_BUILDING_BODY: int = 6
+const Z_BUILDING_ROOF: int = 7
+const Z_LABEL: int = 8
+const Z_MARKER: int = 9
 
 var _definition: MapDefinition = null
 
@@ -371,14 +379,38 @@ func _build_block(parent: Node2D, block: Dictionary) -> void:
 	kerb.z_index = Z_KERB
 	parent.add_child(kerb)
 
+	# Collision stops at the garden fence, not at the kerb. The sidewalk band is
+	# drivable ground: mounting the kerb to get round something, or to pull up
+	# level with a hydrant, is allowed and costs nothing in this build. What is
+	# still solid is the garden behind the fence, and the houses on it.
+	if yard_rect.size.x <= 0.0 or yard_rect.size.y <= 0.0:
+		return
+
+	_build_fence(parent, block_id, yard_rect)
+
 	var body := StaticBody2D.new()
 	body.name = "Lot_%s" % block_id
 	body.collision_layer = LOT_LAYER
 	body.collision_mask = 0
 	var shape := CollisionPolygon2D.new()
-	shape.polygon = _rect_polygon(rect)
+	shape.polygon = _rect_polygon(yard_rect)
 	body.add_child(shape)
 	parent.add_child(body)
+
+
+## The line the truck will actually be stopped at, drawn so it is a line the
+## player can see rather than one they discover. Since Part 2 of this milestone
+## the kerb is no longer where collision begins, so the kerb alone would be a
+## misleading edge to leave as the only one.
+func _build_fence(parent: Node2D, block_id: String, yard_rect: Rect2) -> void:
+	var fence := Line2D.new()
+	fence.name = "Fence_%s" % block_id
+	fence.points = _rect_polygon(yard_rect)
+	fence.closed = true
+	fence.width = FENCE_WIDTH
+	fence.default_color = FENCE_COLOR
+	fence.z_index = Z_FENCE
+	parent.add_child(fence)
 
 
 func _rect_polygon(rect: Rect2) -> PackedVector2Array:
