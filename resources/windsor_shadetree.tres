@@ -8,7 +8,7 @@ map_id = "windsor_shadetree_v1"
 display_name = "Windsor Test Area"
 source_metadata = {
 "accuracy_note": "Not an accurate map of Windsor. Streets and building footprints are from OpenStreetMap; hydrants, some lots and all colours are synthetic. Every feature carries its own source field.",
-"attribution": "(c) OpenStreetMap contributors",
+"attribution": "© OpenStreetMap contributors",
 "copyright_url": "https://www.openstreetmap.org/copyright",
 "dataset": "OpenStreetMap",
 "download_date": "2026-09-07",

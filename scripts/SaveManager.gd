@@ -11,12 +11,29 @@ class_name SaveManager
 ## crash midway through a write leaves the previous save intact rather than a
 ## half-written file that loads as garbage.
 
-const SCHEMA_VERSION: int = 1
+## Version 2 (Milestone 5 Part 2) adds "map_id": which neighbourhood the player
+## last chose. A version 1 file is MIGRATED rather than rejected: it is a
+## complete, valid save that simply predates there being more than one map, and
+## the older rule here, which started fresh on any version it did not recognise,
+## would have taken the credits off every existing player to add a field with an
+## obvious default. Rejection is for a file that cannot be trusted, not for one
+## that is merely old.
+const SCHEMA_VERSION: int = 2
+
+## The oldest version this build can still read. Anything below it is genuinely
+## unreadable rather than simply old.
+const OLDEST_READABLE_VERSION: int = 1
+
 const SAVE_PATH: String = "user://fire_truck_game_save.json"
 const TEMP_PATH: String = "user://fire_truck_game_save.json.tmp"
 
 var credits: int = 0
 var tank_upgrade_owned: bool = false
+
+## Which map the player last played, as a MapCatalogue id. Never a resource
+## path: a path in a save file is a promise about where a file lives that a
+## later build has to keep.
+var map_id: String = MapCatalogue.DEFAULT_ID
 
 ## Set when the last load fell back to defaults, so the caller can say so.
 var last_load_diagnostic: String = ""
@@ -35,6 +52,7 @@ func use_paths(save_path: String, temp_path: String) -> void:
 func reset_to_defaults() -> void:
 	credits = 0
 	tank_upgrade_owned = false
+	map_id = MapCatalogue.DEFAULT_ID
 
 
 ## True when the file was read and every field validated. False means defaults
@@ -70,10 +88,11 @@ func load_game() -> bool:
 		last_load_diagnostic = "save file has no usable schema version, starting fresh"
 		push_warning(last_load_diagnostic)
 		return false
-	if int(version) != SCHEMA_VERSION:
+	var file_version: int = int(version)
+	if file_version < OLDEST_READABLE_VERSION or file_version > SCHEMA_VERSION:
 		last_load_diagnostic = (
-			"save file is schema version %d, this build reads %d, starting fresh"
-			% [int(version), SCHEMA_VERSION]
+			"save file is schema version %d, this build reads %d to %d, starting fresh"
+			% [file_version, OLDEST_READABLE_VERSION, SCHEMA_VERSION]
 		)
 		push_warning(last_load_diagnostic)
 		return false
@@ -104,6 +123,30 @@ func load_game() -> bool:
 
 	credits = int(credits_float)
 	tank_upgrade_owned = raw_upgrade
+
+	# The map. A version 1 file has no such field and is not wrong for that, so
+	# it migrates silently to the default. A version 2 file naming a map this
+	# build does not ship falls back to the default and SAYS SO, but keeps the
+	# credits: a map that has been renamed is not a reason to take a player's
+	# money, and the older all-or-nothing rule would have done exactly that.
+	map_id = MapCatalogue.DEFAULT_ID
+	if file_version < 2:
+		last_load_diagnostic = (
+			"save file is schema version %d, migrated to %d with the %s map"
+			% [file_version, SCHEMA_VERSION, MapCatalogue.title_for(MapCatalogue.DEFAULT_ID)]
+		)
+		return true
+
+	var raw_map: Variant = data.get("map_id", null)
+	if typeof(raw_map) != TYPE_STRING or not MapCatalogue.is_known(String(raw_map)):
+		last_load_diagnostic = (
+			"save file names no map this build ships (%s), falling back to %s"
+			% [str(raw_map), MapCatalogue.title_for(MapCatalogue.DEFAULT_ID)]
+		)
+		push_warning(last_load_diagnostic)
+		return true
+
+	map_id = String(raw_map)
 	return true
 
 
@@ -114,6 +157,7 @@ func save_game() -> bool:
 		"schema_version": SCHEMA_VERSION,
 		"credits": maxi(credits, 0),
 		"tank_upgrade_owned": tank_upgrade_owned,
+		"map_id": map_id if MapCatalogue.is_known(map_id) else MapCatalogue.DEFAULT_ID,
 	}
 
 	var file: FileAccess = FileAccess.open(_temp_path, FileAccess.WRITE)
@@ -141,6 +185,18 @@ func add_credits(amount: int) -> void:
 		return
 	credits += amount
 	save_game()
+
+
+## Remembers the map the player chose, so the next launch opens on it. Refuses
+## a map this build does not ship rather than writing an id nothing can load.
+func set_map(new_map_id: String) -> bool:
+	if not MapCatalogue.is_known(new_map_id):
+		push_warning("refusing to save an unknown map id: %s" % new_map_id)
+		return false
+	if map_id == new_map_id:
+		return true
+	map_id = new_map_id
+	return save_game()
 
 
 ## Returns true only if the purchase actually happened. Refuses a repeat

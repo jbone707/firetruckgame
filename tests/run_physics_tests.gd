@@ -21,6 +21,11 @@ const PHYSICS_FPS: int = 60
 ## is the reason the geometry was rewritten.
 const WINDSOR_MAP: String = "res://resources/windsor_shadetree.tres"
 
+## Where a world built by this runner writes its save, so the suite never
+## touches the player's own.
+const TEST_SAVE_PATH: String = "user://physics_runner_save.json"
+const TEST_TEMP_PATH: String = "user://physics_runner_save.json.tmp"
+
 var _failures: Array[String] = []
 var _checks: int = 0
 
@@ -41,6 +46,7 @@ func _run() -> void:
 	await _check_an_empty_lot_stops_the_truck()
 	await _check_a_windsor_road_is_fenced_at_both_sides()
 	await _check_a_whole_shift_pays_out_on_the_windsor_map()
+	await _check_the_menus_walk_the_way_a_player_walks_them()
 	await _check_every_approach_to_a_hydrant_hooks_up()
 	await _check_the_narrowest_road_the_truck_can_turn_in()
 
@@ -70,11 +76,19 @@ func _check(condition: bool, message: String) -> void:
 ## injected here with zeros, since nothing is held down in a headless run. That
 ## is correct for the game and simply has to be switched off to drive the truck
 ## from a test.
+##
+## The save is redirected before anything else happens. Every check here drives
+## the real GameSession, which banks credits to disk as they are earned, so
+## without this the suite quietly paid the player 350 credits every time it ran
+## and, once maps became choosable, would have changed which map their game
+## opened on. A test that alters the thing it is testing around is not a test.
 func _make_world(map_path: String = "") -> Array:
 	var main: Node = load("res://scenes/Main.tscn").instantiate()
 	root.add_child(main)
 	await physics_frame
 	main.set_physics_process(false)
+	main._save.use_paths(TEST_SAVE_PATH, TEST_TEMP_PATH)
+	main._save.reset_to_defaults()
 	if map_path != "":
 		main.load_map(map_path)
 		await physics_frame
@@ -990,3 +1004,79 @@ static func _corner_map(width: float) -> MapDefinition:
 	# same code path both real maps go through. That is the point of the rig now
 	# as well as of the corner it tests.
 	return definition
+
+
+## The menus, walked the way a player walks them, in the real scene.
+##
+## Every claim here is about wiring that no unit test can reach: which screen
+## a button opens, what Escape does from each one, and whether choosing a map
+## actually swaps the neighbourhood the shift then runs on.
+##
+## The Escape rule is the reason this is worth a check at all. It has to back
+## out exactly one level and it must never land in a running game, and the way
+## that breaks is not a wrong sentence in a function, it is a state nobody
+## thought about while adding a screen.
+func _check_the_menus_walk_the_way_a_player_walks_them() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var session: Node = main._session
+	var ui: Node = main._ui
+
+	_check(session.state == GameSession.State.MENU, "the game opens on the home menu")
+
+	ui.open_map_select_pressed.emit()
+	await physics_frame
+	_check(session.state == GameSession.State.MAP_SELECT, "Start shift opens the map choice")
+
+	_check(session.back_out(), "Escape backs out of the map choice")
+	await physics_frame
+	_check(session.state == GameSession.State.MENU, "to the home menu, one level up")
+
+	ui.open_credits_pressed.emit()
+	await physics_frame
+	_check(session.state == GameSession.State.CREDITS, "Data and credits opens its screen")
+	_check(session.back_out(), "Escape backs out of Data and credits")
+	await physics_frame
+	_check(session.state == GameSession.State.MENU, "to the home menu, one level up")
+
+	_check(
+		not session.back_out(),
+		"and Escape at the home menu backs out of nothing rather than into a game"
+	)
+	_check(session.state == GameSession.State.MENU, "leaving the player on the home menu")
+
+	# Choosing the Windsor map: the shift starts, on that map, and the choice is
+	# written to the save so the next launch opens on it.
+	ui.open_map_select_pressed.emit()
+	await physics_frame
+	ui.map_chosen.emit("windsor_shadetree_v1")
+	await physics_frame
+
+	_check(session.state == GameSession.State.PLAYING, "choosing a map starts the shift")
+	_check(
+		main.get_map_definition().map_id == "windsor_shadetree_v1",
+		"on the map that was chosen (%s)" % main.get_map_definition().map_id
+	)
+	_check(
+		main._save.map_id == "windsor_shadetree_v1",
+		"and the choice is remembered in the save (%s)" % main._save.map_id
+	)
+	_check(
+		main._truck.global_position.distance_to(main.get_station_spawn_position()) < 1.0,
+		"with the truck at the new map's own station, not the old map's"
+	)
+
+	# From a running game Escape pauses. It must not reach back_out() at all:
+	# there is no menu above PLAYING to back out to, and the one thing this rule
+	# must never do is drop the player out of a shift they are in the middle of.
+	_check(
+		not session.back_out(),
+		"Escape in a running game backs out of nothing"
+	)
+	_check(
+		session.state == GameSession.State.PLAYING,
+		"and leaves the shift running"
+	)
+
+	main.queue_free()
+	await physics_frame

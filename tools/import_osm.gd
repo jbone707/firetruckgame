@@ -297,7 +297,11 @@ func _import(elements: Array) -> MapDefinition:
 		"dataset": "OpenStreetMap",
 		"licence": "Open Data Commons Open Database License (ODbL)",
 		"licence_url": "https://opendatacommons.org/licenses/odbl/",
-		"attribution": "(c) OpenStreetMap contributors",
+		# The copyright symbol itself, not "(c)". ATTRIBUTION.md records this as
+		# the required credit line and the Data and Credits screen prints this
+		# exact string, so the two have to be the same characters or the doc is
+		# describing something the game does not say.
+		"attribution": "© OpenStreetMap contributors",
 		"copyright_url": "https://www.openstreetmap.org/copyright",
 		"download_date": "2026-09-07",
 		"source_file": SOURCE_PATH,

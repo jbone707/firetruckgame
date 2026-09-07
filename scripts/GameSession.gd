@@ -17,7 +17,11 @@ signal credits_changed(credits: int)
 signal shift_progress_changed(completed_calls: int, total_calls: int)
 signal shift_ended(succeeded: bool, reason: String)
 
-enum State { MENU, PLAYING, RESULTS, SHOP }
+## MAP_SELECT and CREDITS are appended rather than inserted in menu order, so
+## the numbers every existing check and save already uses do not shift under
+## them. They are menu screens, not phases of a shift: nothing in either can
+## reward, spend or start anything.
+enum State { MENU, PLAYING, RESULTS, SHOP, MAP_SELECT, CREDITS }
 
 var balance: Node = null
 var save_manager: SaveManager = null
@@ -166,6 +170,31 @@ func close_shop() -> void:
 
 func return_to_menu() -> void:
 	_set_state(State.MENU)
+
+
+func open_map_select() -> void:
+	_set_state(State.MAP_SELECT)
+
+
+func open_credits() -> void:
+	_set_state(State.CREDITS)
+
+
+## The one Escape rule, in one place. Escape backs out exactly one level and
+## never lands in a running game: the shop and the results screen are only
+## reachable once a shift is over, and the two menu screens sit above the home
+## menu, so no arrow here points at PLAYING. Returns false when there is
+## nowhere to back out to, which is the home menu and the game itself.
+func back_out() -> bool:
+	match state:
+		State.MAP_SELECT, State.CREDITS:
+			_set_state(State.MENU)
+			return true
+		State.SHOP:
+			_set_state(State.RESULTS)
+			return true
+		_:
+			return false
 
 
 ## Returns a short sentence saying what happened, which is what the shop shows.

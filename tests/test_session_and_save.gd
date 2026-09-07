@@ -431,3 +431,190 @@ func test_credits_are_formatted_the_same_way_on_every_screen() -> void:
 	assert_eq(GameUIScript.format_credits(350), "350 credits", "the usual case")
 	assert_eq(GameUIScript.format_credits(0), "0 credits", "nothing earned still reads in credits")
 	assert_eq(GameUIScript.format_credits(1), "1 credit", "and one is singular")
+
+
+## The map choice, across the schema bump that introduced it.
+##
+## A version 1 save is a complete, valid save that simply predates there being
+## more than one map. Rejecting it, which is what this loader did to every
+## version it did not recognise, would have taken the credits and the upgrade
+## off every existing player in exchange for adding a field with an obvious
+## default. So the migration is the check: the old save keeps everything it had
+## and gains the default map.
+func test_an_old_save_without_a_map_migrates_to_the_default_map() -> void:
+	_clear_save_files()
+
+	var file: FileAccess = FileAccess.open(TEST_SAVE_PATH, FileAccess.WRITE)
+	file.store_string('{"schema_version": 1, "credits": 275, "tank_upgrade_owned": true}')
+	file.close()
+
+	var save: SaveManager = SaveManagerScript.new()
+	save.use_paths(TEST_SAVE_PATH, TEST_TEMP_PATH)
+	var ok: bool = save.load_game()
+
+	assert_true(ok, "a version 1 save loads rather than being thrown away")
+	assert_eq(save.credits, 275, "and keeps its credits")
+	assert_true(save.tank_upgrade_owned, "and keeps its upgrade")
+	assert_eq(
+		save.map_id, MapCatalogue.DEFAULT_ID,
+		"and arrives on the default map (%s)" % save.map_id
+	)
+	assert_true(
+		save.last_load_diagnostic.length() > 0,
+		"and says it was migrated rather than doing it silently"
+	)
+
+	# Saving it again writes the new schema, so the migration happens once.
+	save.save_game()
+	var reloaded: SaveManager = SaveManagerScript.new()
+	reloaded.use_paths(TEST_SAVE_PATH, TEST_TEMP_PATH)
+	assert_true(reloaded.load_game(), "the migrated save reloads")
+	assert_eq(reloaded.credits, 275, "with the credits still there")
+	assert_eq(reloaded.map_id, MapCatalogue.DEFAULT_ID, "and the map still set")
+	assert_eq(
+		reloaded.last_load_diagnostic, "",
+		"and nothing left to migrate the second time"
+	)
+
+	_clear_save_files()
+
+
+## A save naming a map this build does not ship falls back to the default and
+## says so, WITHOUT taking the player's credits. A renamed or dropped map is a
+## reason to put someone on another map, not a reason to empty their bank.
+func test_a_save_naming_an_unknown_map_keeps_the_credits() -> void:
+	_clear_save_files()
+
+	var file: FileAccess = FileAccess.open(TEST_SAVE_PATH, FileAccess.WRITE)
+	file.store_string(
+		'{"schema_version": 2, "credits": 410, "tank_upgrade_owned": false,'
+		+ ' "map_id": "a_map_that_was_removed"}'
+	)
+	file.close()
+
+	var save: SaveManager = SaveManagerScript.new()
+	save.use_paths(TEST_SAVE_PATH, TEST_TEMP_PATH)
+
+	assert_true(save.load_game(), "the save still loads")
+	assert_eq(save.credits, 410, "with the credits untouched")
+	assert_eq(save.map_id, MapCatalogue.DEFAULT_ID, "on the default map")
+	assert_true(save.last_load_diagnostic.length() > 0, "and a diagnostic saying why")
+
+	_clear_save_files()
+
+
+## Choosing a map writes it through to disk immediately, so the next launch
+## opens on it, and an id nothing can load is refused rather than written.
+func test_the_chosen_map_persists_and_an_unknown_one_is_refused() -> void:
+	_clear_save_files()
+
+	var save: SaveManager = SaveManagerScript.new()
+	save.use_paths(TEST_SAVE_PATH, TEST_TEMP_PATH)
+	save.load_game()
+	assert_eq(save.map_id, MapCatalogue.DEFAULT_ID, "a fresh save starts on the default map")
+
+	var windsor: String = "windsor_shadetree_v1"
+	assert_true(MapCatalogue.is_known(windsor), "the Windsor map is one this build ships")
+	assert_true(save.set_map(windsor), "choosing it succeeds")
+
+	var reloaded: SaveManager = SaveManagerScript.new()
+	reloaded.use_paths(TEST_SAVE_PATH, TEST_TEMP_PATH)
+	assert_true(reloaded.load_game(), "the save reloads")
+	assert_eq(reloaded.map_id, windsor, "on the map that was chosen")
+
+	assert_false(
+		reloaded.set_map("not_a_map"), "an unknown map id is refused"
+	)
+	assert_eq(reloaded.map_id, windsor, "and does not disturb the map already chosen")
+
+	_clear_save_files()
+
+
+## Every map the menu offers has to be loadable and has to carry its own honest
+## lines. A map that reached the menu without them would be the whole failure
+## this project is trying not to have.
+func test_every_offered_map_loads_and_carries_its_own_notes() -> void:
+	var entries: Array[Dictionary] = MapCatalogue.entries()
+	assert_true(entries.size() >= 2, "the menu offers more than one map")
+
+	var seen_default: bool = false
+	for entry in entries:
+		var map_id: String = String(entry["id"])
+		if map_id == MapCatalogue.DEFAULT_ID:
+			seen_default = true
+
+		var map: MapDefinition = load(String(entry["path"])) as MapDefinition
+		assert_true(map != null, "%s loads as a MapDefinition" % map_id)
+		if map == null:
+			continue
+		assert_eq(map.map_id, map_id, "%s is the map the catalogue says it is" % map_id)
+		assert_true(
+			String(entry["title"]).strip_edges() != "", "%s has a title on its button" % map_id
+		)
+		assert_true(
+			(entry["notes"] as Array).size() >= 1, "%s says something honest about itself" % map_id
+		)
+
+		# A map carrying real-world data must name where it came from.
+		if not map.source_metadata.is_empty():
+			assert_true(
+				String(map.source_metadata.get("attribution", "")).length() > 0,
+				"%s carries an attribution line" % map_id
+			)
+
+	assert_true(seen_default, "the default map is one of the maps offered")
+	assert_true(
+		MapCatalogue.path_for("not_a_map") == MapCatalogue.path_for(MapCatalogue.DEFAULT_ID),
+		"an unknown map id resolves to the default map's path"
+	)
+
+
+## The Windsor map's notes, verbatim. These two sentences are the reason the map
+## may be shipped at all: the streets are real and the hydrants are invented,
+## and a player is told both before they choose it. A rewording is a decision,
+## not a tidy-up, so it has to break a check.
+func test_the_windsor_map_says_what_is_real_and_what_is_not() -> void:
+	var notes: Array = []
+	for entry in MapCatalogue.entries():
+		if String(entry["id"]) == "windsor_shadetree_v1":
+			notes = entry["notes"]
+
+	assert_true(
+		notes.has("Streets from OpenStreetMap; buildings partly synthetic"),
+		"the map select says the streets are real and the buildings are not entirely"
+	)
+	assert_true(
+		notes.has("Hydrant locations are placeholders, not real"),
+		"and that the hydrants are placeholders"
+	)
+
+
+## The Data and Credits screen actually displays what ATTRIBUTION.md says it
+## displays: the credit line, the licence, and the copyright URL as text.
+##
+## Read from the same static function the panel is built from, so this is what a
+## player sees and not a second copy of it.
+func test_the_credits_screen_shows_the_credit_line_and_the_licence() -> void:
+	var lines: Array[String] = GameUI.credit_lines()
+	var joined: String = "\n".join(lines)
+
+	assert_true(
+		joined.contains("© OpenStreetMap contributors"),
+		"the required credit line is on the screen"
+	)
+	assert_true(
+		joined.contains("Open Data Commons Open Database License (ODbL)"),
+		"the licence is named"
+	)
+	assert_true(
+		joined.contains("https://www.openstreetmap.org/copyright"),
+		"the copyright URL appears as text, since a link cannot be followed here"
+	)
+	assert_true(
+		joined.contains("Not an accurate map of Windsor"),
+		"and the screen says it is not an accurate map"
+	)
+	assert_true(
+		joined.contains("Hydrant locations are placeholders, not real"),
+		"and that the hydrants are placeholders"
+	)

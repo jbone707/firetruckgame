@@ -14,6 +14,11 @@ signal start_shift_pressed
 signal open_shop_pressed
 signal close_shop_pressed
 signal buy_upgrade_pressed
+signal open_map_select_pressed
+signal open_credits_pressed
+signal map_chosen(map_id: String)
+signal back_pressed
+signal quit_pressed
 
 const PANEL_WIDTH: float = 460.0
 const BAR_SIZE: Vector2 = Vector2(190.0, 18.0)
@@ -36,6 +41,11 @@ var _siren_label: Label
 
 var _menu_panel: Control
 var _menu_start_button: Button
+var _map_panel: Control
+var _map_buttons: Dictionary = {}
+var _map_back_button: Button
+var _credits_panel: Control
+var _credits_back_button: Button
 var _results_panel: Control
 var _results_title: Label
 var _results_detail: Label
@@ -62,6 +72,8 @@ func _ready() -> void:
 	layer = 5
 	_build_hud()
 	_build_menu_panel()
+	_build_map_panel()
+	_build_credits_panel()
 	_build_results_panel()
 	_build_shop_panel()
 	show_menu()
@@ -213,6 +225,8 @@ func _make_button(text: String) -> Button:
 	return button
 
 
+## The home screen: three things a player can do, the first of which takes
+## focus so Enter starts a shift without touching the mouse.
 func _build_menu_panel() -> void:
 	var built: Array = _make_panel("Fire Truck Game")
 	_menu_panel = built[0]
@@ -226,8 +240,16 @@ func _build_menu_panel() -> void:
 	rows.add_child(blurb)
 
 	_menu_start_button = _make_button("Start shift")
-	_menu_start_button.pressed.connect(func() -> void: start_shift_pressed.emit())
+	_menu_start_button.pressed.connect(func() -> void: open_map_select_pressed.emit())
 	rows.add_child(_menu_start_button)
+
+	var credits_button := _make_button("Data and credits")
+	credits_button.pressed.connect(func() -> void: open_credits_pressed.emit())
+	rows.add_child(credits_button)
+
+	var quit_button := _make_button("Quit")
+	quit_button.pressed.connect(func() -> void: quit_pressed.emit())
+	rows.add_child(quit_button)
 
 	var controls := _make_label(
 		"W or up drives, S or down brakes then reverses, A and D steer."
@@ -237,6 +259,101 @@ func _build_menu_panel() -> void:
 	)
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	rows.add_child(controls)
+
+
+## The map choice. Each map is a button with its own honest lines under it,
+## taken from MapCatalogue rather than typed here, so a map's warnings travel
+## with the map and cannot be dropped by an edit to this layout.
+##
+## The lines are set in smaller type but they are not fine print: they say the
+## streets are real and the hydrants are not, which is the single thing a player
+## could otherwise reasonably misunderstand about this map.
+func _build_map_panel() -> void:
+	var built: Array = _make_panel("Choose a Map")
+	_map_panel = built[0]
+	var rows: VBoxContainer = built[1]
+
+	var blurb := _make_label("Where tonight's shift runs. Your last choice is ready to go.")
+	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	rows.add_child(blurb)
+
+	for entry in MapCatalogue.entries():
+		var map_id: String = String(entry["id"])
+		var button := _make_button(String(entry["title"]))
+		button.pressed.connect(func() -> void: map_chosen.emit(map_id))
+		rows.add_child(button)
+		_map_buttons[map_id] = button
+
+		for note in entry["notes"]:
+			var line := _make_label(String(note), 13)
+			line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			line.add_theme_color_override("font_color", Color(0.82, 0.86, 0.92, 0.9))
+			rows.add_child(line)
+
+	_map_back_button = _make_button("Back")
+	_map_back_button.pressed.connect(func() -> void: back_pressed.emit())
+	rows.add_child(_map_back_button)
+
+
+## Where the data came from and what its licence asks for. Reachable from the
+## home menu, which is what makes the credit line something the game displays
+## rather than something a file in the repository claims it displays.
+##
+## The credit line, the licence and the URL are read off the map resource's own
+## source_metadata, so they arrive with the data. A screen that hard-coded them
+## would keep saying the same thing after the data underneath it changed.
+func _build_credits_panel() -> void:
+	var built: Array = _make_panel("Data and Credits")
+	_credits_panel = built[0]
+	var rows: VBoxContainer = built[1]
+
+	for line in credit_lines():
+		var label := _make_label(line, 15 if line.begins_with("©") else 14)
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		rows.add_child(label)
+
+	_credits_back_button = _make_button("Back")
+	_credits_back_button.pressed.connect(func() -> void: back_pressed.emit())
+	rows.add_child(_credits_back_button)
+
+
+## The body of the Data and Credits screen, in order, as plain sentences.
+##
+## Static and free of any node so the unit suite can read exactly what a player
+## is shown, which is the only way "the credit line is displayed" can be
+## something a check knows rather than something a person remembers to look at.
+static func credit_lines() -> Array[String]:
+	var lines: Array[String] = [
+		"The Windsor test area is built from OpenStreetMap data.",
+	]
+
+	var metadata: Dictionary = {}
+	for entry in MapCatalogue.entries():
+		var map: MapDefinition = load(String(entry["path"])) as MapDefinition
+		if map != null and not map.source_metadata.is_empty():
+			metadata = map.source_metadata
+			break
+
+	lines.append(String(metadata.get("attribution", "© OpenStreetMap contributors")))
+	lines.append(
+		"The data is available under the %s."
+		% String(metadata.get("licence", "Open Data Commons Open Database License (ODbL)"))
+	)
+	lines.append(String(metadata.get(
+		"copyright_url", "https://www.openstreetmap.org/copyright"
+	)))
+	lines.append(String(metadata.get("accuracy_note", "")))
+	lines.append(
+		"Hydrant locations are placeholders, not real. No map images are used,"
+		+ " and the game makes no network calls."
+	)
+	lines.append("Elm Grove is invented. It is not a real place.")
+
+	var kept: Array[String] = []
+	for line in lines:
+		if line.strip_edges() != "":
+			kept.append(line)
+	return kept
 
 
 func _build_results_panel() -> void:
@@ -328,19 +445,35 @@ func _build_shop_panel() -> void:
 # State
 # ---------------------------------------------------------------------------
 
+## Exactly one panel is visible at a time, and every screen sets every panel, so
+## a new screen can never leave an old one showing underneath it.
+func _show_only(panel: Control, hud: bool = false) -> void:
+	_hud.visible = hud
+	for candidate in [_menu_panel, _map_panel, _credits_panel, _results_panel, _shop_panel]:
+		candidate.visible = candidate == panel
+
+
 func show_menu() -> void:
-	_hud.visible = false
-	_menu_panel.visible = true
-	_results_panel.visible = false
-	_shop_panel.visible = false
+	_show_only(_menu_panel)
 	_focus(_menu_start_button)
 
 
+## The map choice, with the map the player last used taking focus, so Enter
+## repeats the last shift's map and nobody has to re-read the list to do the
+## ordinary thing.
+func show_map_select(current_map_id: String) -> void:
+	_show_only(_map_panel)
+	var button: Button = _map_buttons.get(current_map_id, null)
+	_focus(button if button != null else _map_back_button)
+
+
+func show_credits() -> void:
+	_show_only(_credits_panel)
+	_focus(_credits_back_button)
+
+
 func show_playing() -> void:
-	_hud.visible = true
-	_menu_panel.visible = false
-	_results_panel.visible = false
-	_shop_panel.visible = false
+	_show_only(null, true)
 
 
 ## reason is a sentence from GameSession saying how the shift ended. calls_pay
@@ -356,10 +489,7 @@ func show_results(
 	bonus_pay: int,
 	banked: int
 ) -> void:
-	_hud.visible = false
-	_menu_panel.visible = false
-	_results_panel.visible = true
-	_shop_panel.visible = false
+	_show_only(_results_panel)
 
 	_results_title.text = "Shift Complete" if succeeded else "Shift Over"
 	_results_detail.text = "%s. You cleared %d of %d calls." % [
@@ -384,10 +514,7 @@ func show_results(
 func show_shop(
 	credits: int, owned: bool, cost: int, status: String, capacity: float, multiplier: float
 ) -> void:
-	_hud.visible = false
-	_menu_panel.visible = false
-	_results_panel.visible = false
-	_shop_panel.visible = true
+	_show_only(_shop_panel)
 
 	_shop_effect.text = "Tank capacity %d to %d units" % [
 		int(round(capacity)), int(round(capacity * multiplier))

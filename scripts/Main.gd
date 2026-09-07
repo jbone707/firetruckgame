@@ -6,7 +6,6 @@ extends Node2D
 ## or gamepad layer replaces this file and nothing else (handoff section 8).
 ## It also owns the wiring between GameSession, DispatchManager and the UI.
 
-const MAP_RESOURCE_PATH: String = "res://resources/neighbourhood.tres"
 
 @onready var _map_builder: MapBuilder = %MapBuilder
 @onready var _truck: TruckController = %Truck
@@ -35,15 +34,18 @@ func _ready() -> void:
 		% Engine.get_version_info()["string"]
 	)
 
+	# The camera needs its target before load_map, which snaps it, and its
+	# limits before it is made current, so it never spends a frame showing
+	# past the edge of a map it has not been told the size of.
 	_camera.target = _truck
-	_camera.make_current()
 
 	_save = SaveManager.new()
 	_save.load_game()
 	if _save.last_load_diagnostic != "":
 		print("Fire Truck Game: %s" % _save.last_load_diagnostic)
 
-	load_map(MAP_RESOURCE_PATH)
+	load_map(MapCatalogue.path_for(_save.map_id))
+	_camera.make_current()
 	_session.setup(self, _dispatch, _truck, _water, _save)
 
 	_pause_menu.resume_requested.connect(_set_paused.bind(false))
@@ -53,6 +55,11 @@ func _ready() -> void:
 	_ui.open_shop_pressed.connect(_on_open_shop_pressed)
 	_ui.close_shop_pressed.connect(_on_close_shop_pressed)
 	_ui.buy_upgrade_pressed.connect(_on_buy_upgrade_pressed)
+	_ui.open_map_select_pressed.connect(_session.open_map_select)
+	_ui.open_credits_pressed.connect(_session.open_credits)
+	_ui.map_chosen.connect(_on_map_chosen)
+	_ui.back_pressed.connect(_on_back_pressed)
+	_ui.quit_pressed.connect(_on_quit_pressed)
 
 	_session.state_changed.connect(_on_session_state_changed)
 	_session.credits_changed.connect(_ui.set_credits)
@@ -188,12 +195,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	# Escape backs out of the shop to the results screen it was opened from. It
-	# must never drop the player into a running game: the shop is only reachable
-	# once a shift is already over, and close_shop() returns to RESULTS, so there
-	# is no path from here into PLAYING.
-	if event.is_action_pressed("pause") and _session.state == GameSession.State.SHOP:
-		_on_close_shop_pressed()
+	# Escape backs out one level: the map choice and the credits screen to the
+	# home menu, the shop to the results screen it was opened from. It must
+	# never drop the player into a running game, which is a property of
+	# GameSession.back_out() rather than of this branch: every arrow it can
+	# follow points at a menu.
+	if event.is_action_pressed("pause") and _session.back_out():
 		get_viewport().set_input_as_handled()
 		return
 
@@ -331,6 +338,32 @@ func _on_start_shift_pressed() -> void:
 	_shop_status = ""
 	_set_paused(false)
 	_session.start_shift()
+	# start_shift puts the truck back at the station. Without this the camera
+	# glides there from wherever the last shift ended, which on a map 12,499
+	# units across is a long, uncontrollable pan over the player's first
+	# seconds. It is also what the off-screen call arrow measures from, so a
+	# camera still in motion makes the arrow briefly point somewhere the fire
+	# is not.
+	_camera.snap_to_target()
+
+
+## Picking a map both remembers it and plays it. The choice is written to the
+## save first, so a player who picks a map and then crashes out still opens on
+## the map they chose; loading it before saving would leave the two disagreeing
+## in exactly that case.
+func _on_map_chosen(map_id: String) -> void:
+	_save.set_map(map_id)
+	if _map_definition == null or _map_definition.map_id != map_id:
+		load_map(MapCatalogue.path_for(map_id))
+	_on_start_shift_pressed()
+
+
+func _on_back_pressed() -> void:
+	_session.back_out()
+
+
+func _on_quit_pressed() -> void:
+	get_tree().quit()
 
 
 func _on_open_shop_pressed() -> void:
@@ -362,6 +395,10 @@ func _on_session_state_changed(state: int) -> void:
 	match state:
 		GameSession.State.MENU:
 			_ui.show_menu()
+		GameSession.State.MAP_SELECT:
+			_ui.show_map_select(_save.map_id)
+		GameSession.State.CREDITS:
+			_ui.show_credits()
 		GameSession.State.PLAYING:
 			_ui.show_playing()
 			_ui.set_condition(_truck.condition, _truck.max_condition)

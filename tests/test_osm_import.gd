@@ -146,9 +146,12 @@ func test_the_map_records_where_its_data_came_from() -> void:
 			String(map.source_metadata.get(key, "")) != "",
 			"source_metadata records \"%s\"" % key
 		)
+	# The copyright symbol itself, not "(c)". ATTRIBUTION.md records this exact
+	# string as the required credit line and the Data and Credits screen prints
+	# it verbatim, so all three have to be the same characters.
 	assert_eq(
 		String(map.source_metadata.get("attribution", "")),
-		"(c) OpenStreetMap contributors",
+		"© OpenStreetMap contributors",
 		"source_metadata carries the required credit line"
 	)
 	for key in ["min_latitude", "max_latitude", "min_longitude", "max_longitude", "units_per_metre"]:
