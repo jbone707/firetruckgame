@@ -37,7 +37,11 @@ screen. Speed builds up and bleeds off smoothly under acceleration, braking,
 and drag rather than snapping to a target speed, and turning tightens up at
 higher speed so the truck feels weighted instead of twitchy. Buildings and
 map edges block the truck; hitting them hard enough damages it, but a light
-bump does little or nothing.
+bump does little or nothing. What a crash costs follows the speed you hit at:
+walking pace is free, and a flat-out head-on takes about half the engine's
+condition, so you can crash badly twice in a shift and still finish, but not
+three times. Every impact shakes the camera briefly, so a hit is something you
+see rather than something you notice later in the corner of the screen.
 
 ## Water Model
 
@@ -49,7 +53,15 @@ building's exterior rather than being blocked by that building's own walls.
 A fire has two separate values: its health, which drops while it is hit
 directly and reaches zero when it is put out, and its escalation, which
 climbs on its own from the moment it is dispatched until it either gets
-extinguished or reaches the loss threshold. Running the tank dry stops the
+extinguished or reaches the loss threshold.
+
+How long a call gets is a fixed allowance for fighting the fire plus an
+allowance for the distance you have to cover to reach it, worked out from the
+road distance the moment you are dispatched. A call across the neighbourhood is
+a longer drive rather than a harder fire. The countdown on the HUD is still a
+plain number of seconds with nothing hidden behind it; it simply starts higher
+when the fire is further away, and it grows and says it is running out when it
+drops under thirty seconds. Running the tank dry stops the
 stream immediately; a hydrant takes a second to hook up and then fills at 50
 units a second, so a full tank is about three seconds from the moment the
 hookup begins.

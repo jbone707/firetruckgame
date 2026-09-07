@@ -60,8 +60,6 @@ const DASH_GAP: float = 32.0
 const LOT_LAYER: int = 0b10000  # layer 5, world_lot
 const ROOF_INSET_SCALE: float = 0.62
 const WALL_THICKNESS: float = 40.0
-const HYDRANT_COLOR: Color = Color(0.85, 0.05, 0.05)
-const INCIDENT_MARKER_COLOR: Color = Color(1.0, 0.65, 0.0)
 const LABEL_COLOR: Color = Color(0.95, 0.95, 0.90)
 
 ## Draw order, bottom to top. Every drawn node sets exactly one of these.
@@ -81,7 +79,7 @@ const Z_FENCE: int = 5
 const Z_BUILDING_BODY: int = 6
 const Z_BUILDING_ROOF: int = 7
 const Z_LABEL: int = 8
-const Z_MARKER: int = 9
+const Z_MARKER: int = 9  # reserved: nothing draws at this level today
 
 var _definition: MapDefinition = null
 
@@ -143,12 +141,12 @@ func build(definition: MapDefinition) -> void:
 	for building in definition.buildings:
 		_build_building(buildings_root, building)
 
-	# Hydrants and incident candidates are no longer drawn here. Part 4 gives
-	# hydrants a real node with an interaction radius, and Part 5 marks only the
-	# one call that is actually dispatched. Drawing them here as well would put
-	# a second dot under every hydrant and mark three buildings the player has
-	# not been sent to. The two _build_*_marker helpers below are kept because
-	# they are what a future map preview tool would want.
+	# Hydrants and incident candidates are not drawn here. Hydrant is a real node
+	# with its own interaction ring, and only the dispatched call is marked, by
+	# FireIncident. Drawing them here as well would put a second dot under every
+	# hydrant and mark buildings the player has not been sent to. The helpers
+	# that used to do it were kept for a map preview tool that never arrived and
+	# have been deleted; Markers below is the empty layer they would go back in.
 
 	_build_edge_walls(walls_root, definition.world_bounds)
 
@@ -468,40 +466,6 @@ func _inset_polygon(polygon: PackedVector2Array, scale: float) -> PackedVector2A
 		inset.append(centroid + (p - centroid) * scale)
 	return inset
 
-
-# ---------------------------------------------------------------------------
-# Decorative markers (hydrants and incident candidates). No collision:
-# Part 4 builds the interactive hydrant/fire-target areas on their own
-# layers; these are purely the map's visual marks.
-# ---------------------------------------------------------------------------
-
-func _build_hydrant_marker(parent: Node2D, hydrant: Dictionary) -> void:
-	var marker := Polygon2D.new()
-	marker.name = "Hydrant_%s" % String(hydrant["id"])
-	marker.polygon = _circle_polygon(6.0, 8)
-	marker.color = HYDRANT_COLOR
-	marker.position = hydrant["position"]
-	marker.z_index = Z_MARKER
-	parent.add_child(marker)
-
-
-func _build_incident_marker(parent: Node2D, incident: Dictionary) -> void:
-	var marker := Polygon2D.new()
-	marker.name = "IncidentMarker_%s" % String(incident["id"])
-	marker.polygon = _circle_polygon(5.0, 4)
-	marker.color = INCIDENT_MARKER_COLOR
-	marker.position = incident["position"]
-	marker.rotation = PI / 4.0
-	marker.z_index = Z_MARKER
-	parent.add_child(marker)
-
-
-func _circle_polygon(radius: float, sides: int) -> PackedVector2Array:
-	var points := PackedVector2Array()
-	for i in range(sides):
-		var angle: float = TAU * float(i) / float(sides)
-		points.append(Vector2(cos(angle), sin(angle)) * radius)
-	return points
 
 
 # ---------------------------------------------------------------------------
