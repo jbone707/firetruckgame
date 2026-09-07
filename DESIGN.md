@@ -76,6 +76,21 @@ and sidewalks are decorative only; buildings and the four map-edge walls
 block movement), but it is not yet wired into the playable scene, and there
 is no truck, camera or HUD to view it with yet.
 
+## What Is Actually Built
+
+Everything above this line is implemented and running as of the final commit of
+this first playable build: the neighbourhood and its collision, the truck, the
+north up camera, impact damage, pause, the water tank and turret, fire incidents
+with separate health and escalation, hydrants, sequential dispatch, the HUD, the
+results screen, the shop and the save file. Earlier drafts of this document
+called parts of it scaffolding, which was true when they were written and is not
+true now.
+
+Two things described above rest on judgement no automated check can make, so they
+are on James's playtest list rather than claimed here: how the truck FEELS to
+drive, and whether the fire effects stay readable in motion. The six item manual
+checklist is in `DEVELOPMENT_STATUS.md`.
+
 ## Future, Not Implemented
 
 The following are part of the long-term vision but are explicitly out of

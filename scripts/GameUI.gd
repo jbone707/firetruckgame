@@ -34,6 +34,7 @@ var _prompt_label: Label
 var _siren_label: Label
 
 var _menu_panel: Control
+var _menu_start_button: Button
 var _results_panel: Control
 var _results_title: Label
 var _results_detail: Label
@@ -41,6 +42,8 @@ var _shop_panel: Control
 var _shop_status: Label
 var _shop_owned: Label
 var _buy_button: Button
+var _results_shop_button: Button
+var _shop_back_button: Button
 
 var _arrow: Control
 var _arrow_direction: Vector2 = Vector2.ZERO
@@ -214,9 +217,9 @@ func _build_menu_panel() -> void:
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	rows.add_child(blurb)
 
-	var start_button: Button = _make_button("Start shift")
-	start_button.pressed.connect(func() -> void: start_shift_pressed.emit())
-	rows.add_child(start_button)
+	_menu_start_button = _make_button("Start shift")
+	_menu_start_button.pressed.connect(func() -> void: start_shift_pressed.emit())
+	rows.add_child(_menu_start_button)
 
 	var controls := _make_label(
 		"W or up drives, S or down brakes then reverses, A and D steer."
@@ -239,9 +242,9 @@ func _build_results_panel() -> void:
 	_results_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rows.add_child(_results_detail)
 
-	var shop_button: Button = _make_button("Open the shop")
-	shop_button.pressed.connect(func() -> void: open_shop_pressed.emit())
-	rows.add_child(shop_button)
+	_results_shop_button = _make_button("Open the shop")
+	_results_shop_button.pressed.connect(func() -> void: open_shop_pressed.emit())
+	rows.add_child(_results_shop_button)
 
 	var again_button: Button = _make_button("Start another shift")
 	again_button.pressed.connect(func() -> void: start_shift_pressed.emit())
@@ -272,9 +275,9 @@ func _build_shop_panel() -> void:
 	_shop_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rows.add_child(_shop_status)
 
-	var back_button: Button = _make_button("Back")
-	back_button.pressed.connect(func() -> void: close_shop_pressed.emit())
-	rows.add_child(back_button)
+	_shop_back_button = _make_button("Back")
+	_shop_back_button.pressed.connect(func() -> void: close_shop_pressed.emit())
+	rows.add_child(_shop_back_button)
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +289,7 @@ func show_menu() -> void:
 	_menu_panel.visible = true
 	_results_panel.visible = false
 	_shop_panel.visible = false
+	_focus(_menu_start_button)
 
 
 func show_playing() -> void:
@@ -304,6 +308,7 @@ func show_results(succeeded: bool, reason: String, earned: int, total: int) -> v
 	_results_detail.text = "%s. You earned %d credits this shift, and have %d." % [
 		reason, earned, total
 	]
+	_focus(_results_shop_button)
 
 
 func show_shop(credits: int, owned: bool, cost: int, status: String) -> void:
@@ -317,6 +322,7 @@ func show_shop(credits: int, owned: bool, cost: int, status: String) -> void:
 	)
 	_buy_button.disabled = owned or credits < cost
 	_shop_status.text = status
+	_focus(_shop_back_button if _buy_button.disabled else _buy_button)
 
 
 # ---------------------------------------------------------------------------
@@ -387,3 +393,13 @@ func _draw_arrow() -> void:
 		36.0,
 		13
 	)
+
+
+## Moves keyboard focus to the first thing a panel wants pressed, so every
+## screen is operable without a mouse and Tab starts somewhere sensible. Focus
+## can only be grabbed once a control is inside the tree, which is why this is
+## guarded rather than called during construction.
+func _focus(control: Control) -> void:
+	if control == null or not control.is_inside_tree():
+		return
+	control.grab_focus()

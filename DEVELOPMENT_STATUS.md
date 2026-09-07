@@ -363,3 +363,89 @@ whole file of checks could stop existing with nothing to say so, which is the on
 runner must never do. `run_tests.gd` now fails on a script it cannot instantiate.
 
 Next milestone: Part 6, verification, self-review and documents.
+
+## Part 6: Verification and Self-Review
+
+### What was run, and what it returned
+
+    godot --headless --path . --import                              exit 0
+    godot --headless --path . --quit-after 300                      exit 0
+    godot --headless --path . --script res://tests/run_tests.gd     exit 0
+        4 test files, 28 test methods, 255 assertions, 0 failed, no leaks
+    godot --headless --path . --script res://tests/run_physics_tests.gd  exit 0
+        16 checks, 0 failed
+
+### Checkers proven by deliberate failure
+
+A check that has never failed is a hope, not a check. Three were broken on purpose
+and watched to fail, then restored:
+
+1. **The velocity reconciliation in `TruckController`.** Commenting out
+   `velocity = get_real_velocity()` makes the physics runner report "got 10" damage
+   events for one wall crash and exit 1. The unit suite stays green at exit 0
+   throughout, which is the honest measure of what each runner covers.
+2. **Stream occlusion.** Dropping the world_static bit from the query mask in
+   `WaterSystem._query_stream()` makes the obstacle check report health 80.0 and
+   exit 1.
+3. **The reward guard.** Removing the `_rewarded_incidents` check in `GameSession`
+   makes one call pay 350 instead of 100 and the shift advance three calls instead
+   of one, and the unit suite exits 1.
+
+### Handoff section 10 self-review
+
+- **Input focus.** The pause menu and all three UI panels move focus to their first
+  control when shown, so every screen is keyboard operable. Fixed in this part; the
+  panels had no focus handling before.
+- **Mouse to world under a moving camera.** Aim uses `get_global_mouse_position()`,
+  which accounts for the canvas transform. Reading the raw viewport position would
+  have aimed at a fixed screen point the moment the truck moved.
+- **Collision masks.** Layer 1 world_static (buildings and edge walls, blocks the
+  truck and occludes the stream), layer 2 truck, layer 3 fire_target, layer 4
+  hydrant. Roads, sidewalks and labels carry no collision shape at all.
+- **Obstacle occlusion.** Covered by a physics check and proven by deliberate
+  failure.
+- **Terminal state reward guards.** Guarded in two places and proven by deliberate
+  failure.
+- **Restart cleanup.** `start_shift()` clears incidents, connections, cooldowns,
+  the destroyed guard, the reward set and the bonus flag, and resets the truck and
+  tank in place rather than making new ones. Covered by a test.
+- **Save validation.** Six malformed cases are each rejected with a diagnostic and
+  safe defaults.
+- **Refill and spray exclusivity.** Refill wins, enforced inside `WaterSystem` and
+  again at the input layer.
+
+### What could NOT be observed, and is James's playtest list
+
+There is no way to watch this run from here. The headless checks prove rules and
+integration, not feel, and no screenshot of the game was ever taken. These six are
+from handoff section 10 and are yours:
+
+1. Drive around a block, brake and reverse, then hit a building gently and hard.
+2. Spray a fire, miss deliberately, and watch both fire health and water.
+3. Run dry, reach a hydrant, refill, and interrupt the hookup by driving off.
+4. Complete three calls, get one completion bonus, and buy the tank upgrade.
+5. Start again, confirm the bigger tank, fail deliberately after banking a call,
+   then restart the application and confirm the credits survived.
+6. Pause during spraying and escalation, and resize the window to check the HUD.
+
+### Windows export
+
+Skipped, as instructed. There is no `export_templates` directory under
+`%APPDATA%\Godot`, so no 4.7.2 templates are installed and nothing was installed to
+change that. Editor play is unaffected.
+
+### Known issues and open questions
+
+- Driving feel is untested by a human. The invented values in `GameBalance.gd` are
+  first guesses and are the first thing to change after a playtest.
+- There is no audio at all. The siren toggles the warning lights and a HUD line;
+  no sound is produced, because no audio assets are permitted in this build and
+  synthesising a siren was out of scope.
+- Escalation is a flat 120 seconds and is not slowed by effective suppression,
+  which handoff section 5 asks for deliberately: no hidden rules in this version.
+- The off-screen call arrow is a direction indicator, not a minimap. Handoff
+  section 7 allows either.
+
+Next milestone, not started and not to be started automatically: importing a small
+real Windsor neighbourhood through `MapDefinition`, validating drivable
+connectivity and hydrant access, then basic traffic and signals.
