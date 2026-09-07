@@ -2,28 +2,44 @@ extends Node2D
 class_name MapBuilder
 ## Constructs the playable scene from a MapDefinition (handoff §7, §8).
 ##
-## Drawing only. Roads, sidewalks, street name labels and hydrant/incident
-## markers are purely visual and carry no collision shape at all. Only
-## buildings and the four map-edge walls get collision, both on physics
-## layer 1 ("world_static"), mask 0, per the contract fixed by the main
-## session. Clean retro-inspired shapes, built-in drawing (Polygon2D/Line2D)
+## Roads, street name labels and hydrant/incident markers are purely visual and
+## carry no collision shape at all. Buildings and the four map-edge walls get
+## collision on physics layer 1 ("world_static"), mask 0, which both stops the
+## truck and blocks the water stream. Blocks, the filled land between the roads,
+## get collision on layer 5 ("world_lot"): solid to the truck, transparent to
+## the stream. Clean retro-inspired shapes, built-in drawing (Polygon2D/Line2D)
 ## and built-in fonts only, no external assets.
+##
+## The whole map is therefore tiled: road pavement, or block. Nothing between
+## the two is drivable.
 
 const ROAD_COLOR: Color = Color(0.28, 0.28, 0.30)
 const SIDEWALK_COLOR: Color = Color(0.72, 0.72, 0.68)
-const SIDEWALK_WIDTH: float = 24.0
+
+## Width of the concrete band around the edge of every block, world units.
+const SIDEWALK_WIDTH: float = 34.0
+
+## The physics layer everything that is not a building sits on inside a block:
+## sidewalk, garden, fence, kerb. It stops the truck, exactly as a building
+## does, but it is deliberately absent from WaterSystem's stream mask, because a
+## stream clears a fence and a front lawn and does not clear a house. Without
+## that split, filling the blocks in would have made every fire on the map
+## unreachable from the street it faces.
+const LOT_LAYER: int = 0b10000  # layer 5, world_lot
 const ROOF_INSET_SCALE: float = 0.62
 const WALL_THICKNESS: float = 40.0
 const HYDRANT_COLOR: Color = Color(0.85, 0.05, 0.05)
 const INCIDENT_MARKER_COLOR: Color = Color(1.0, 0.65, 0.0)
 const LABEL_COLOR: Color = Color(0.95, 0.95, 0.90)
+const KERB_COLOR: Color = Color(0.55, 0.55, 0.52)
 
 const Z_ROAD: int = 0
 const Z_SIDEWALK: int = 1
-const Z_BUILDING_BODY: int = 2
-const Z_BUILDING_ROOF: int = 3
-const Z_LABEL: int = 4
-const Z_MARKER: int = 5
+const Z_YARD: int = 2
+const Z_BUILDING_BODY: int = 3
+const Z_BUILDING_ROOF: int = 4
+const Z_LABEL: int = 5
+const Z_MARKER: int = 6
 
 var _definition: MapDefinition = null
 
@@ -37,6 +53,10 @@ func build(definition: MapDefinition) -> void:
 	var roads_root := Node2D.new()
 	roads_root.name = "Roads"
 	add_child(roads_root)
+
+	var blocks_root := Node2D.new()
+	blocks_root.name = "Blocks"
+	add_child(blocks_root)
 
 	var buildings_root := Node2D.new()
 	buildings_root.name = "Buildings"
@@ -52,6 +72,9 @@ func build(definition: MapDefinition) -> void:
 
 	for road in definition.roads:
 		_build_road(roads_root, road)
+
+	for block in definition.blocks:
+		_build_block(blocks_root, block)
 
 	for building in definition.buildings:
 		_build_building(buildings_root, building)
@@ -127,24 +150,12 @@ func _build_road(parent: Node2D, road: Dictionary) -> void:
 	if points.size() < 2:
 		return
 
+	# Sidewalks are no longer drawn per road. They belong to the blocks now,
+	# which run kerb to kerb, so a sidewalk laid alongside a road would be a
+	# second one on top of the block's own and would spill across every
+	# junction it passed through.
 	var direction: Vector2 = (points[points.size() - 1] - points[0]).normalized()
 	var perpendicular := Vector2(-direction.y, direction.x)
-	var offset: float = width / 2.0 + SIDEWALK_WIDTH / 2.0
-
-	for side in [1.0, -1.0]:
-		var sidewalk := Line2D.new()
-		sidewalk.name = "Sidewalk_%s_%s" % [String(road["id"]), ("a" if side > 0.0 else "b")]
-		var offset_points := PackedVector2Array()
-		for p in points:
-			offset_points.append(p + perpendicular * offset * side)
-		sidewalk.points = offset_points
-		sidewalk.width = SIDEWALK_WIDTH
-		sidewalk.default_color = SIDEWALK_COLOR
-		sidewalk.joint_mode = Line2D.LINE_JOINT_ROUND
-		sidewalk.begin_cap_mode = Line2D.LINE_CAP_ROUND
-		sidewalk.end_cap_mode = Line2D.LINE_CAP_ROUND
-		sidewalk.z_index = Z_SIDEWALK
-		parent.add_child(sidewalk)
 
 	var label := Label.new()
 	label.name = "Label_%s" % String(road["id"])
@@ -156,6 +167,69 @@ func _build_road(parent: Node2D, road: Dictionary) -> void:
 	var label_offset: float = width / 2.0 + SIDEWALK_WIDTH + 8.0
 	label.position = midpoint + perpendicular * label_offset - Vector2(String(road["name"]).length() * 3.5, 8.0)
 	parent.add_child(label)
+
+
+# ---------------------------------------------------------------------------
+# Blocks: the land between the roads
+# ---------------------------------------------------------------------------
+
+## One block: a concrete sidewalk band around the outside, a garden fill inside
+## it, a kerb line where the concrete meets the road, and one collision body
+## covering the whole thing on LOT_LAYER.
+##
+## Filling the blocks in is the point of this part. Before it, the gaps between
+## buildings were open ground and the truck could drive between the houses and
+## across the back gardens, which is what made the streets read as decoration
+## rather than as the road network.
+func _build_block(parent: Node2D, block: Dictionary) -> void:
+	var rect: Rect2 = block["rect"]
+	var block_id: String = String(block["id"])
+
+	var sidewalk := Polygon2D.new()
+	sidewalk.name = "Sidewalk_%s" % block_id
+	sidewalk.polygon = _rect_polygon(rect)
+	sidewalk.color = SIDEWALK_COLOR
+	sidewalk.z_index = Z_SIDEWALK
+	parent.add_child(sidewalk)
+
+	var yard_rect: Rect2 = rect.grow(-SIDEWALK_WIDTH)
+	if yard_rect.size.x > 0.0 and yard_rect.size.y > 0.0:
+		var yard := Polygon2D.new()
+		yard.name = "Yard_%s" % block_id
+		yard.polygon = _rect_polygon(yard_rect)
+		yard.color = block["yard_color"]
+		yard.z_index = Z_YARD
+		parent.add_child(yard)
+
+	# The kerb: a darker line right on the block's edge, so the boundary between
+	# what can be driven on and what cannot is a visible edge rather than a
+	# change of colour the player has to infer.
+	var kerb := Line2D.new()
+	kerb.name = "Kerb_%s" % block_id
+	kerb.points = _rect_polygon(rect)
+	kerb.closed = true
+	kerb.width = 4.0
+	kerb.default_color = KERB_COLOR
+	kerb.z_index = Z_SIDEWALK
+	parent.add_child(kerb)
+
+	var body := StaticBody2D.new()
+	body.name = "Lot_%s" % block_id
+	body.collision_layer = LOT_LAYER
+	body.collision_mask = 0
+	var shape := CollisionPolygon2D.new()
+	shape.polygon = _rect_polygon(rect)
+	body.add_child(shape)
+	parent.add_child(body)
+
+
+func _rect_polygon(rect: Rect2) -> PackedVector2Array:
+	return PackedVector2Array([
+		rect.position,
+		Vector2(rect.position.x + rect.size.x, rect.position.y),
+		rect.position + rect.size,
+		Vector2(rect.position.x, rect.position.y + rect.size.y),
+	])
 
 
 # ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ func _run() -> void:
 	await _check_a_shift_starts_and_dispatches_in_the_real_scene()
 	await _check_the_call_arrow_points_at_the_fire_from_any_heading()
 	await _check_the_call_arrow_hides_once_the_fire_is_on_screen()
+	await _check_an_empty_lot_stops_the_truck()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -97,9 +98,13 @@ func _check_wall_contact_damages_exactly_once() -> void:
 	var main: Node = world[0]
 	var truck: Node = world[1]
 
-	# Aim due east down an open lane at the map's edge wall, then hold the
-	# throttle into it for ten seconds, which is twenty contact cooldowns.
-	truck.rotation = 0.0
+	# Aim due north up Elm Avenue at the map's edge wall, then hold the throttle
+	# into it for ten seconds, which is twenty contact cooldowns. The station
+	# faces along this avenue and the avenue runs to the boundary, so the first
+	# thing the truck meets really is the edge wall and not a kerb. Driving east
+	# instead, as this check used to, now runs into the block opposite the
+	# station within 95 units, which tests something else entirely.
+	truck.rotation = -PI / 2.0
 	truck.velocity = Vector2.ZERO
 	truck.condition = truck.max_condition
 
@@ -430,3 +435,58 @@ func _check_the_call_arrow_hides_once_the_fire_is_on_screen() -> void:
 func _screen_centre_world(main: Node) -> Vector2:
 	var canvas: Transform2D = main.get_viewport().get_canvas_transform()
 	return canvas.affine_inverse() * (main.get_viewport_rect().size * 0.5)
+
+
+## The block fill, driven into rather than reasoned about.
+##
+## Before this part the land between the buildings was open ground: the truck
+## could leave the road at any gap between two houses and drive across the back
+## gardens, which is what made a 140 unit road read as a line painted on a field
+## rather than as the only way through the neighbourhood. Blocks now carry
+## collision on layer 5, and the truck's mask includes it.
+##
+## The station sits on Elm Avenue facing south, with block blk_00 immediately to
+## its east; the truck is aimed straight at the gap between that block's north
+## and south rows of houses, which is the emptiest ground on the map.
+func _check_an_empty_lot_stops_the_truck() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var truck: Node = world[1]
+
+	var definition: MapDefinition = main._map_definition
+	var lot: Rect2 = Rect2()
+	for block in definition.blocks:
+		if String(block["id"]) == "blk_00":
+			lot = block["rect"]
+	_check(lot.size.x > 0.0, "the map has a block blk_00 to drive at")
+	if lot.size.x <= 0.0:
+		main.queue_free()
+		await physics_frame
+		return
+
+	truck.global_position = main.get_station_spawn_position()
+	truck.rotation = 0.0  # due east, straight at the block
+	truck.velocity = Vector2.ZERO
+	var start_x: float = truck.global_position.x
+
+	var deepest_x: float = -INF
+	for _frame in range(4 * PHYSICS_FPS):
+		truck.set_drive_intent(1.0, 0.0, false)
+		await physics_frame
+		deepest_x = maxf(deepest_x, truck.global_position.x)
+
+	# The truck is 90 long, so its centre stops about 45 short of the kerb it is
+	# pressed against. Anything past the kerb line means it drove onto the lot.
+	_check(
+		deepest_x > start_x + 20.0,
+		"the truck actually set off toward the lot (reached x %.1f from %.1f)"
+			% [deepest_x, start_x]
+	)
+	_check(
+		deepest_x < lot.position.x,
+		"four seconds of throttle at an empty lot never crosses its kerb"
+			+ " (deepest x %.1f, kerb at %.1f)" % [deepest_x, lot.position.x]
+	)
+
+	main.queue_free()
+	await physics_frame

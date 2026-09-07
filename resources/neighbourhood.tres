@@ -4,110 +4,378 @@
 
 [resource]
 script = ExtResource("1_o864j")
-map_id = "fictional_neighbourhood_v1"
+map_id = "fictional_neighbourhood_v2"
 display_name = "Elm Grove"
-world_bounds = Rect2(0, 0, 1400, 1000)
-station_spawn_position = Vector2(200, 110)
+world_bounds = Rect2(0, 0, 4000, 3000)
+station_spawn_position = Vector2(400, 700)
 station_spawn_heading = 1.5707963267948966
 roads = Array[Dictionary]([{
 "id": "r_ash",
 "name": "Ash Street",
-"points": PackedVector2Array(100, 150, 1300, 150),
-"width": 140.0
+"points": PackedVector2Array(0, 250, 4000, 250),
+"width": 280.0
 }, {
 "id": "r_birch",
 "name": "Birch Street",
-"points": PackedVector2Array(100, 500, 1300, 500),
-"width": 140.0
+"points": PackedVector2Array(0, 1080, 4000, 1080),
+"width": 280.0
 }, {
 "id": "r_cedar",
 "name": "Cedar Street",
-"points": PackedVector2Array(100, 850, 1300, 850),
-"width": 140.0
+"points": PackedVector2Array(0, 1910, 4000, 1910),
+"width": 280.0
+}, {
+"id": "r_dogwood",
+"name": "Dogwood Street",
+"points": PackedVector2Array(0, 2740, 4000, 2740),
+"width": 280.0
 }, {
 "id": "r_elm",
 "name": "Elm Avenue",
-"points": PackedVector2Array(200, 100, 200, 900),
-"width": 140.0
+"points": PackedVector2Array(400, 0, 400, 3000),
+"width": 280.0
 }, {
 "id": "r_fir",
 "name": "Fir Avenue",
-"points": PackedVector2Array(700, 100, 700, 900),
-"width": 140.0
+"points": PackedVector2Array(1500, 0, 1500, 3000),
+"width": 280.0
 }, {
 "id": "r_grove",
 "name": "Grove Avenue",
-"points": PackedVector2Array(1200, 100, 1200, 900),
-"width": 140.0
+"points": PackedVector2Array(2600, 0, 2600, 3000),
+"width": 280.0
+}, {
+"id": "r_hazel",
+"name": "Hazel Avenue",
+"points": PackedVector2Array(3700, 0, 3700, 3000),
+"width": 280.0
 }])
 buildings = Array[Dictionary]([{
 "body_color": Color(0.8, 0.62, 0.45, 1),
-"id": "b_a1",
-"polygon": PackedVector2Array(300, 250, 440, 250, 440, 400, 300, 400),
+"id": "b_00_0",
+"polygon": PackedVector2Array(600, 430, 930, 430, 930, 600, 600, 600),
 "roof_color": Color(0.55, 0.2, 0.2, 1)
 }, {
 "body_color": Color(0.75, 0.75, 0.7, 1),
-"id": "b_a2",
-"polygon": PackedVector2Array(470, 260, 600, 260, 600, 390, 470, 390),
+"id": "b_00_1",
+"polygon": PackedVector2Array(970, 430, 1300, 430, 1300, 600, 970, 600),
+"roof_color": Color(0.45, 0.25, 0.2, 1)
+}, {
+"body_color": Color(0.85, 0.8, 0.65, 1),
+"id": "b_00_2",
+"polygon": PackedVector2Array(600, 730, 930, 730, 930, 900, 600, 900),
+"roof_color": Color(0.55, 0.2, 0.2, 1)
+}, {
+"body_color": Color(0.7, 0.55, 0.45, 1),
+"id": "b_00_3",
+"polygon": PackedVector2Array(970, 730, 1300, 730, 1300, 900, 970, 900),
+"roof_color": Color(0.45, 0.25, 0.2, 1)
+}, {
+"body_color": Color(0.7, 0.55, 0.45, 1),
+"id": "b_01_0",
+"polygon": PackedVector2Array(1700, 430, 2030, 430, 2030, 600, 1700, 600),
+"roof_color": Color(0.35, 0.45, 0.3, 1)
+}, {
+"body_color": Color(0.78, 0.72, 0.6, 1),
+"id": "b_01_1",
+"polygon": PackedVector2Array(2070, 430, 2400, 430, 2400, 600, 2070, 600),
+"roof_color": Color(0.4, 0.3, 0.55, 1)
+}, {
+"body_color": Color(0.82, 0.66, 0.5, 1),
+"id": "b_01_2",
+"polygon": PackedVector2Array(1700, 730, 2030, 730, 2030, 900, 1700, 900),
+"roof_color": Color(0.35, 0.45, 0.3, 1)
+}, {
+"body_color": Color(0.8, 0.62, 0.45, 1),
+"id": "b_01_3",
+"polygon": PackedVector2Array(2070, 730, 2400, 730, 2400, 900, 2070, 900),
+"roof_color": Color(0.4, 0.3, 0.55, 1)
+}, {
+"body_color": Color(0.8, 0.62, 0.45, 1),
+"id": "b_02_0",
+"polygon": PackedVector2Array(2800, 430, 3130, 430, 3130, 600, 2800, 600),
+"roof_color": Color(0.3, 0.3, 0.4, 1)
+}, {
+"body_color": Color(0.75, 0.75, 0.7, 1),
+"id": "b_02_1",
+"polygon": PackedVector2Array(3170, 430, 3500, 430, 3500, 600, 3170, 600),
 "roof_color": Color(0.25, 0.35, 0.55, 1)
 }, {
 "body_color": Color(0.85, 0.8, 0.65, 1),
-"id": "b_b1",
-"polygon": PackedVector2Array(800, 250, 940, 250, 940, 400, 800, 400),
+"id": "b_02_2",
+"polygon": PackedVector2Array(2800, 730, 3130, 730, 3130, 900, 2800, 900),
+"roof_color": Color(0.3, 0.3, 0.4, 1)
+}, {
+"body_color": Color(0.7, 0.55, 0.45, 1),
+"id": "b_02_3",
+"polygon": PackedVector2Array(3170, 730, 3500, 730, 3500, 900, 3170, 900),
+"roof_color": Color(0.25, 0.35, 0.55, 1)
+}, {
+"body_color": Color(0.75, 0.75, 0.7, 1),
+"id": "b_10_0",
+"polygon": PackedVector2Array(600, 1260, 930, 1260, 930, 1430, 600, 1430),
+"roof_color": Color(0.4, 0.3, 0.55, 1)
+}, {
+"body_color": Color(0.85, 0.8, 0.65, 1),
+"id": "b_10_1",
+"polygon": PackedVector2Array(970, 1260, 1300, 1260, 1300, 1430, 970, 1430),
 "roof_color": Color(0.35, 0.45, 0.3, 1)
 }, {
 "body_color": Color(0.7, 0.55, 0.45, 1),
-"id": "b_b2",
-"polygon": PackedVector2Array(970, 260, 1100, 260, 1100, 390, 970, 390),
+"id": "b_10_2",
+"polygon": PackedVector2Array(600, 1560, 930, 1560, 930, 1730, 600, 1730),
+"roof_color": Color(0.4, 0.3, 0.55, 1)
+}, {
+"body_color": Color(0.78, 0.72, 0.6, 1),
+"id": "b_10_3",
+"polygon": PackedVector2Array(970, 1560, 1300, 1560, 1300, 1730, 970, 1730),
+"roof_color": Color(0.35, 0.45, 0.3, 1)
+}, {
+"body_color": Color(0.78, 0.72, 0.6, 1),
+"id": "b_11_0",
+"polygon": PackedVector2Array(1700, 1260, 2030, 1260, 2030, 1430, 1700, 1430),
+"roof_color": Color(0.25, 0.35, 0.55, 1)
+}, {
+"body_color": Color(0.82, 0.66, 0.5, 1),
+"id": "b_11_1",
+"polygon": PackedVector2Array(2070, 1260, 2400, 1260, 2400, 1430, 2070, 1430),
+"roof_color": Color(0.3, 0.3, 0.4, 1)
+}, {
+"body_color": Color(0.8, 0.62, 0.45, 1),
+"id": "b_11_2",
+"polygon": PackedVector2Array(1700, 1560, 2030, 1560, 2030, 1730, 1700, 1730),
+"roof_color": Color(0.25, 0.35, 0.55, 1)
+}, {
+"body_color": Color(0.75, 0.75, 0.7, 1),
+"id": "b_11_3",
+"polygon": PackedVector2Array(2070, 1560, 2400, 1560, 2400, 1730, 2070, 1730),
+"roof_color": Color(0.3, 0.3, 0.4, 1)
+}, {
+"body_color": Color(0.75, 0.75, 0.7, 1),
+"id": "b_12_0",
+"polygon": PackedVector2Array(2800, 1260, 3130, 1260, 3130, 1430, 2800, 1430),
+"roof_color": Color(0.45, 0.25, 0.2, 1)
+}, {
+"body_color": Color(0.85, 0.8, 0.65, 1),
+"id": "b_12_1",
+"polygon": PackedVector2Array(3170, 1260, 3500, 1260, 3500, 1430, 3170, 1430),
+"roof_color": Color(0.55, 0.2, 0.2, 1)
+}, {
+"body_color": Color(0.7, 0.55, 0.45, 1),
+"id": "b_12_2",
+"polygon": PackedVector2Array(2800, 1560, 3130, 1560, 3130, 1730, 2800, 1730),
 "roof_color": Color(0.45, 0.25, 0.2, 1)
 }, {
 "body_color": Color(0.78, 0.72, 0.6, 1),
-"id": "b_c1",
-"polygon": PackedVector2Array(300, 600, 440, 600, 440, 750, 300, 750),
+"id": "b_12_3",
+"polygon": PackedVector2Array(3170, 1560, 3500, 1560, 3500, 1730, 3170, 1730),
+"roof_color": Color(0.55, 0.2, 0.2, 1)
+}, {
+"body_color": Color(0.85, 0.8, 0.65, 1),
+"id": "b_20_0",
+"polygon": PackedVector2Array(600, 2090, 930, 2090, 930, 2260, 600, 2260),
+"roof_color": Color(0.3, 0.3, 0.4, 1)
+}, {
+"body_color": Color(0.7, 0.55, 0.45, 1),
+"id": "b_20_1",
+"polygon": PackedVector2Array(970, 2090, 1300, 2090, 1300, 2260, 970, 2260),
+"roof_color": Color(0.25, 0.35, 0.55, 1)
+}, {
+"body_color": Color(0.78, 0.72, 0.6, 1),
+"id": "b_20_2",
+"polygon": PackedVector2Array(600, 2390, 930, 2390, 930, 2560, 600, 2560),
 "roof_color": Color(0.3, 0.3, 0.4, 1)
 }, {
 "body_color": Color(0.82, 0.66, 0.5, 1),
-"id": "b_c2",
-"polygon": PackedVector2Array(470, 610, 600, 610, 600, 740, 470, 740),
-"roof_color": Color(0.5, 0.3, 0.25, 1)
+"id": "b_20_3",
+"polygon": PackedVector2Array(970, 2390, 1300, 2390, 1300, 2560, 970, 2560),
+"roof_color": Color(0.25, 0.35, 0.55, 1)
 }, {
-"body_color": Color(0.72, 0.78, 0.72, 1),
-"id": "b_d1",
-"polygon": PackedVector2Array(800, 600, 940, 600, 940, 750, 800, 750),
-"roof_color": Color(0.35, 0.5, 0.4, 1)
+"body_color": Color(0.82, 0.66, 0.5, 1),
+"id": "b_21_0",
+"polygon": PackedVector2Array(1700, 2090, 2030, 2090, 2030, 2260, 1700, 2260),
+"roof_color": Color(0.55, 0.2, 0.2, 1)
 }, {
-"body_color": Color(0.76, 0.7, 0.62, 1),
-"id": "b_d2",
-"polygon": PackedVector2Array(970, 610, 1100, 610, 1100, 740, 970, 740),
+"body_color": Color(0.8, 0.62, 0.45, 1),
+"id": "b_21_1",
+"polygon": PackedVector2Array(2070, 2090, 2400, 2090, 2400, 2260, 2070, 2260),
+"roof_color": Color(0.45, 0.25, 0.2, 1)
+}, {
+"body_color": Color(0.75, 0.75, 0.7, 1),
+"id": "b_21_2",
+"polygon": PackedVector2Array(1700, 2390, 2030, 2390, 2030, 2560, 1700, 2560),
+"roof_color": Color(0.55, 0.2, 0.2, 1)
+}, {
+"body_color": Color(0.85, 0.8, 0.65, 1),
+"id": "b_21_3",
+"polygon": PackedVector2Array(2070, 2390, 2400, 2390, 2400, 2560, 2070, 2560),
+"roof_color": Color(0.45, 0.25, 0.2, 1)
+}, {
+"body_color": Color(0.85, 0.8, 0.65, 1),
+"id": "b_22_0",
+"polygon": PackedVector2Array(2800, 2090, 3130, 2090, 3130, 2260, 2800, 2260),
+"roof_color": Color(0.35, 0.45, 0.3, 1)
+}, {
+"body_color": Color(0.7, 0.55, 0.45, 1),
+"id": "b_22_1",
+"polygon": PackedVector2Array(3170, 2090, 3500, 2090, 3500, 2260, 3170, 2260),
 "roof_color": Color(0.4, 0.3, 0.55, 1)
+}, {
+"body_color": Color(0.78, 0.72, 0.6, 1),
+"id": "b_22_2",
+"polygon": PackedVector2Array(2800, 2390, 3130, 2390, 3130, 2560, 2800, 2560),
+"roof_color": Color(0.35, 0.45, 0.3, 1)
+}, {
+"body_color": Color(0.82, 0.66, 0.5, 1),
+"id": "b_22_3",
+"polygon": PackedVector2Array(3170, 2390, 3500, 2390, 3500, 2560, 3170, 2560),
+"roof_color": Color(0.4, 0.3, 0.55, 1)
+}])
+blocks = Array[Dictionary]([{
+"id": "verge_00",
+"rect": Rect2(0, 0, 260, 110),
+"yard_color": Color(0.3, 0.44, 0.28, 1)
+}, {
+"id": "verge_01",
+"rect": Rect2(540, 0, 820, 110),
+"yard_color": Color(0.318, 0.4508, 0.2872, 1)
+}, {
+"id": "verge_02",
+"rect": Rect2(1640, 0, 820, 110),
+"yard_color": Color(0.336, 0.4616, 0.2944, 1)
+}, {
+"id": "verge_03",
+"rect": Rect2(2740, 0, 820, 110),
+"yard_color": Color(0.354, 0.4724, 0.3016, 1)
+}, {
+"id": "verge_04",
+"rect": Rect2(3840, 0, 160, 110),
+"yard_color": Color(0.3, 0.44, 0.28, 1)
+}, {
+"id": "verge_10",
+"rect": Rect2(0, 390, 260, 550),
+"yard_color": Color(0.354, 0.4724, 0.3016, 1)
+}, {
+"id": "blk_00",
+"rect": Rect2(540, 390, 820, 550),
+"yard_color": Color(0.3, 0.44, 0.28, 1)
+}, {
+"id": "blk_01",
+"rect": Rect2(1640, 390, 820, 550),
+"yard_color": Color(0.318, 0.4508, 0.2872, 1)
+}, {
+"id": "blk_02",
+"rect": Rect2(2740, 390, 820, 550),
+"yard_color": Color(0.336, 0.4616, 0.2944, 1)
+}, {
+"id": "verge_14",
+"rect": Rect2(3840, 390, 160, 550),
+"yard_color": Color(0.354, 0.4724, 0.3016, 1)
+}, {
+"id": "verge_20",
+"rect": Rect2(0, 1220, 260, 550),
+"yard_color": Color(0.336, 0.4616, 0.2944, 1)
+}, {
+"id": "blk_10",
+"rect": Rect2(540, 1220, 820, 550),
+"yard_color": Color(0.354, 0.4724, 0.3016, 1)
+}, {
+"id": "blk_11",
+"rect": Rect2(1640, 1220, 820, 550),
+"yard_color": Color(0.3, 0.44, 0.28, 1)
+}, {
+"id": "blk_12",
+"rect": Rect2(2740, 1220, 820, 550),
+"yard_color": Color(0.318, 0.4508, 0.2872, 1)
+}, {
+"id": "verge_24",
+"rect": Rect2(3840, 1220, 160, 550),
+"yard_color": Color(0.336, 0.4616, 0.2944, 1)
+}, {
+"id": "verge_30",
+"rect": Rect2(0, 2050, 260, 550),
+"yard_color": Color(0.318, 0.4508, 0.2872, 1)
+}, {
+"id": "blk_20",
+"rect": Rect2(540, 2050, 820, 550),
+"yard_color": Color(0.336, 0.4616, 0.2944, 1)
+}, {
+"id": "blk_21",
+"rect": Rect2(1640, 2050, 820, 550),
+"yard_color": Color(0.354, 0.4724, 0.3016, 1)
+}, {
+"id": "blk_22",
+"rect": Rect2(2740, 2050, 820, 550),
+"yard_color": Color(0.3, 0.44, 0.28, 1)
+}, {
+"id": "verge_34",
+"rect": Rect2(3840, 2050, 160, 550),
+"yard_color": Color(0.318, 0.4508, 0.2872, 1)
+}, {
+"id": "verge_40",
+"rect": Rect2(0, 2880, 260, 120),
+"yard_color": Color(0.3, 0.44, 0.28, 1)
+}, {
+"id": "verge_41",
+"rect": Rect2(540, 2880, 820, 120),
+"yard_color": Color(0.318, 0.4508, 0.2872, 1)
+}, {
+"id": "verge_42",
+"rect": Rect2(1640, 2880, 820, 120),
+"yard_color": Color(0.336, 0.4616, 0.2944, 1)
+}, {
+"id": "verge_43",
+"rect": Rect2(2740, 2880, 820, 120),
+"yard_color": Color(0.354, 0.4724, 0.3016, 1)
+}, {
+"id": "verge_44",
+"rect": Rect2(3840, 2880, 160, 120),
+"yard_color": Color(0.3, 0.44, 0.28, 1)
 }])
 hydrants = Array[Dictionary]([{
 "id": "h_station",
-"position": Vector2(150, 230)
+"position": Vector2(550, 700)
 }, {
-"id": "h_fir",
-"position": Vector2(780, 300)
+"id": "h_ash_fir",
+"position": Vector2(1700, 400)
 }, {
-"id": "h_grove",
-"position": Vector2(1120, 700)
+"id": "h_birch_west",
+"position": Vector2(800, 930)
 }, {
-"id": "h_elm_south",
-"position": Vector2(220, 780)
+"id": "h_grove_mid",
+"position": Vector2(2450, 1500)
+}, {
+"id": "h_cedar_east",
+"position": Vector2(3000, 2060)
+}, {
+"id": "h_dogwood_west",
+"position": Vector2(900, 2590)
+}, {
+"id": "h_hazel_south",
+"position": Vector2(3550, 2300)
 }])
 incident_candidates = Array[Dictionary]([{
-"building_id": "b_a1",
-"id": "ic_a1",
-"position": Vector2(370, 235)
+"building_id": "b_00_1",
+"id": "ic_00_1",
+"position": Vector2(1135, 380)
 }, {
-"building_id": "b_b2",
-"id": "ic_b2",
-"position": Vector2(1115, 325)
+"building_id": "b_02_2",
+"id": "ic_02_2",
+"position": Vector2(2965, 950)
 }, {
-"building_id": "b_c2",
-"id": "ic_c2",
-"position": Vector2(615, 675)
+"building_id": "b_11_3",
+"id": "ic_11_3",
+"position": Vector2(2235, 1780)
 }, {
-"building_id": "b_d1",
-"id": "ic_d1",
-"position": Vector2(870, 585)
+"building_id": "b_12_2",
+"id": "ic_12_2",
+"position": Vector2(2965, 1780)
+}, {
+"building_id": "b_20_0",
+"id": "ic_20_0",
+"position": Vector2(765, 2040)
+}, {
+"building_id": "b_22_1",
+"id": "ic_22_1",
+"position": Vector2(3335, 2040)
 }])

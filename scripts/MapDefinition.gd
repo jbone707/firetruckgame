@@ -12,10 +12,11 @@ class_name MapDefinition
 ## map of Windsor, California or any other real place (handoff §1, §7).
 
 ## Bumped whenever a field is added, removed or reinterpreted so a loader can
-## detect an old save/resource and migrate or reject it.
-@export var schema_version: int = 1
+## detect an old save/resource and migrate or reject it. Version 2 added
+## "blocks" and rescaled the whole neighbourhood.
+@export var schema_version: int = 2
 
-## Stable machine identifier for this map, e.g. "fictional_neighbourhood_v1".
+## Stable machine identifier for this map, e.g. "fictional_neighbourhood_v2".
 @export var map_id: String = ""
 
 ## Human-readable name, Title Case, shown to the player if the game ever
@@ -53,6 +54,13 @@ class_name MapDefinition
 ## body_color: Color, roof_color: Color}.
 @export var buildings: Array[Dictionary] = []
 
+## The land between the roads. Each entry: {id: String, rect: Rect2,
+## yard_color: Color}. A block runs kerb to kerb, so the block rectangles and
+## the road pavement together tile the whole neighbourhood with nothing left
+## over. Everything inside a block is solid, sidewalk and yard and lot alike:
+## the only drivable surface on the map is road.
+@export var blocks: Array[Dictionary] = []
+
 ## Each entry: {id: String, position: Vector2}.
 @export var hydrants: Array[Dictionary] = []
 
@@ -63,94 +71,220 @@ class_name MapDefinition
 
 ## Builds the one fictional test neighbourhood used for this milestone.
 ##
-## Layout: a 3x3 grid of named streets (three east-west, three north-south)
-## forming four interior blocks, each holding two buildings set back from
-## the road far enough to clear the road's own pavement plus a sidewalk.
-## The station sits at the northwest corner, on Elm Avenue just north of
-## its junction with Ash Street.
+## Laid out from the numbers below rather than typed coordinate by coordinate,
+## because at this scale there are 36 houses and 9 blocks, and a hand-placed map
+## drifts out of agreement with its own rules the first time a road moves. Every
+## position here is derived from the road grid, so the grid is the only thing
+## that has to be right.
 ##
-## Road width (140.0, see ROAD_WIDTH below) and every coordinate here were
-## chosen to fit GameBalance's truck dimensions and stream range; see
-## DEVELOPMENT_STATUS.md for the reasoning, not repeated in this comment
-## because it would drift the moment either number changes.
+## Layout: a 4x4 grid of named streets (four east-west, four north-south)
+## enclosing nine blocks. Each block carries four houses, two facing the street
+## to its north and two facing the street to its south, with back gardens
+## between them. The station sits on Elm Avenue on the west side of the map,
+## with a hydrant on the sidewalk beside it.
+##
+## Scale, and the measurement behind it, is recorded in DEVELOPMENT_STATUS.md:
+## roads are ROAD_WIDTH wide, a little over three truck lengths, and at the
+## camera's zoom one road spans about a fifth of the screen. The map is
+## 4000x3000, so the player sees roughly a third of its width at a time rather
+## than nearly all of it.
 static func create_fictional_neighbourhood() -> MapDefinition:
-	const ROAD_WIDTH: float = 140.0
+	# Kerb to kerb: two lanes plus shoulders, a little over three truck lengths.
+	const ROAD_WIDTH: float = 280.0
+	const HALF_ROAD: float = ROAD_WIDTH / 2.0
+
+	# East-west streets, north to south, and north-south avenues, west to east.
+	const STREET_Y: Array = [250.0, 1080.0, 1910.0, 2740.0]
+	const AVENUE_X: Array = [400.0, 1500.0, 2600.0, 3700.0]
+	const STREET_NAMES: Array = ["Ash Street", "Birch Street", "Cedar Street", "Dogwood Street"]
+	const AVENUE_NAMES: Array = ["Elm Avenue", "Fir Avenue", "Grove Avenue", "Hazel Avenue"]
+	const STREET_IDS: Array = ["r_ash", "r_birch", "r_cedar", "r_dogwood"]
+	const AVENUE_IDS: Array = ["r_elm", "r_fir", "r_grove", "r_hazel"]
+
+	# How far a house's front wall stands back from the kerb: the sidewalk plus
+	# a strip of front garden. Deliberately short, because a fire has to be
+	# reachable from the street within GameBalance's stream_range.
+	const FRONT_SETBACK: float = 40.0
+	const HOUSE_DEPTH: float = 170.0
+	const SIDE_MARGIN: float = 60.0
+	const HOUSE_GAP: float = 40.0
+
+	# Hydrants and incident markers stand on the sidewalk, just past the kerb.
+	const KERB_STANDOFF: float = 10.0
 
 	var def := MapDefinition.new()
-	def.schema_version = 1
-	def.map_id = "fictional_neighbourhood_v1"
+	def.schema_version = 2
+	def.map_id = "fictional_neighbourhood_v2"
 	def.display_name = "Elm Grove"
 	def.source_metadata = {}
 	def.geographic_bounds = {}
-	def.world_bounds = Rect2(0.0, 0.0, 1400.0, 1000.0)
-	def.station_spawn_position = Vector2(200.0, 110.0)
-	def.station_spawn_heading = PI / 2.0 # south, toward Ash Street
+	def.world_bounds = Rect2(0.0, 0.0, 4000.0, 3000.0)
+	def.station_spawn_position = Vector2(AVENUE_X[0], 700.0)
+	def.station_spawn_heading = PI / 2.0 # south, down Elm Avenue
 
-	def.roads = [
-		{
-			"id": "r_ash",
-			"name": "Ash Street",
-			"points": PackedVector2Array([Vector2(100.0, 150.0), Vector2(1300.0, 150.0)]),
+	# Every street runs the full width of the map and every avenue its full
+	# height. All sixteen junctions are real crossings, the network is one
+	# connected graph with more than one route between any two points, and,
+	# because the roads reach the boundary, the land left over is exactly the
+	# rectangles between them: no ragged strip along the edge for the truck to
+	# escape onto.
+	var street_x0: float = def.world_bounds.position.x
+	var street_x1: float = def.world_bounds.position.x + def.world_bounds.size.x
+	var avenue_y0: float = def.world_bounds.position.y
+	var avenue_y1: float = def.world_bounds.position.y + def.world_bounds.size.y
+
+	var roads: Array[Dictionary] = []
+	for index in range(STREET_Y.size()):
+		roads.append({
+			"id": STREET_IDS[index],
+			"name": STREET_NAMES[index],
+			"points": PackedVector2Array([
+				Vector2(street_x0, STREET_Y[index]), Vector2(street_x1, STREET_Y[index]),
+			]),
 			"width": ROAD_WIDTH,
-		},
-		{
-			"id": "r_birch",
-			"name": "Birch Street",
-			"points": PackedVector2Array([Vector2(100.0, 500.0), Vector2(1300.0, 500.0)]),
+		})
+	for index in range(AVENUE_X.size()):
+		roads.append({
+			"id": AVENUE_IDS[index],
+			"name": AVENUE_NAMES[index],
+			"points": PackedVector2Array([
+				Vector2(AVENUE_X[index], avenue_y0), Vector2(AVENUE_X[index], avenue_y1),
+			]),
 			"width": ROAD_WIDTH,
-		},
-		{
-			"id": "r_cedar",
-			"name": "Cedar Street",
-			"points": PackedVector2Array([Vector2(100.0, 850.0), Vector2(1300.0, 850.0)]),
-			"width": ROAD_WIDTH,
-		},
-		{
-			"id": "r_elm",
-			"name": "Elm Avenue",
-			"points": PackedVector2Array([Vector2(200.0, 100.0), Vector2(200.0, 900.0)]),
-			"width": ROAD_WIDTH,
-		},
-		{
-			"id": "r_fir",
-			"name": "Fir Avenue",
-			"points": PackedVector2Array([Vector2(700.0, 100.0), Vector2(700.0, 900.0)]),
-			"width": ROAD_WIDTH,
-		},
-		{
-			"id": "r_grove",
-			"name": "Grove Avenue",
-			"points": PackedVector2Array([Vector2(1200.0, 100.0), Vector2(1200.0, 900.0)]),
-			"width": ROAD_WIDTH,
-		},
+		})
+	def.roads = roads
+
+	# Which lots may catch fire. Spread across the map on purpose: a shift
+	# should not be three calls to the same corner. Each entry is
+	# [row, column, slot], slots 0 and 1 facing the street north of the block
+	# and 2 and 3 facing the street south of it.
+	var candidate_lots: Array = [
+		[0, 0, 1], [0, 2, 2], [1, 1, 3], [2, 0, 0], [2, 2, 1], [1, 2, 2],
 	]
 
-	def.buildings = [
-		_building("b_a1", 300.0, 250.0, 440.0, 400.0, Color(0.80, 0.62, 0.45), Color(0.55, 0.20, 0.20)),
-		_building("b_a2", 470.0, 260.0, 600.0, 390.0, Color(0.75, 0.75, 0.70), Color(0.25, 0.35, 0.55)),
-		_building("b_b1", 800.0, 250.0, 940.0, 400.0, Color(0.85, 0.80, 0.65), Color(0.35, 0.45, 0.30)),
-		_building("b_b2", 970.0, 260.0, 1100.0, 390.0, Color(0.70, 0.55, 0.45), Color(0.45, 0.25, 0.20)),
-		_building("b_c1", 300.0, 600.0, 440.0, 750.0, Color(0.78, 0.72, 0.60), Color(0.30, 0.30, 0.40)),
-		_building("b_c2", 470.0, 610.0, 600.0, 740.0, Color(0.82, 0.66, 0.50), Color(0.50, 0.30, 0.25)),
-		_building("b_d1", 800.0, 600.0, 940.0, 750.0, Color(0.72, 0.78, 0.72), Color(0.35, 0.50, 0.40)),
-		_building("b_d2", 970.0, 610.0, 1100.0, 740.0, Color(0.76, 0.70, 0.62), Color(0.40, 0.30, 0.55)),
-	]
+	# The land, as the bands of map the roads do not cover. Band 0 is the strip
+	# outside the first road and the last band the strip outside the last, so
+	# every square unit of the neighbourhood is either road pavement or block,
+	# with nothing in between. Only the interior blocks (bands 1 to 3 on both
+	# axes) are deep enough to carry houses; the edge strips are verge.
+	var x_bands: Array = _bands(AVENUE_X, HALF_ROAD, street_x0, street_x1)
+	var y_bands: Array = _bands(STREET_Y, HALF_ROAD, avenue_y0, avenue_y1)
 
+	var blocks: Array[Dictionary] = []
+	var buildings: Array[Dictionary] = []
+	var candidates: Array[Dictionary] = []
+
+	for band_row in range(y_bands.size()):
+		for band_column in range(x_bands.size()):
+			var top: float = y_bands[band_row][0]
+			var bottom: float = y_bands[band_row][1]
+			var left: float = x_bands[band_column][0]
+			var right: float = x_bands[band_column][1]
+			if right - left <= 0.0 or bottom - top <= 0.0:
+				continue
+
+			var row: int = band_row - 1
+			var column: int = band_column - 1
+			var interior: bool = (
+				row >= 0 and row < STREET_Y.size() - 1
+				and column >= 0 and column < AVENUE_X.size() - 1
+			)
+
+			blocks.append({
+				"id": (
+					"blk_%d%d" % [row, column] if interior
+					else "verge_%d%d" % [band_row, band_column]
+				),
+				"rect": Rect2(left, top, right - left, bottom - top),
+				"yard_color": _yard_color(band_row, band_column),
+			})
+
+			if not interior:
+				continue
+
+			var house_width: float = ((right - left) - SIDE_MARGIN * 2.0 - HOUSE_GAP) / 2.0
+
+			for slot in range(4):
+				var faces_north: bool = slot < 2
+				var x0: float = left + SIDE_MARGIN + float(slot % 2) * (house_width + HOUSE_GAP)
+				var y0: float = (
+					top + FRONT_SETBACK if faces_north
+					else bottom - FRONT_SETBACK - HOUSE_DEPTH
+				)
+				var house_id: String = "b_%d%d_%d" % [row, column, slot]
+				buildings.append(_building(
+					house_id,
+					x0, y0, x0 + house_width, y0 + HOUSE_DEPTH,
+					_body_color(row, column, slot), _roof_color(row, column, slot)
+				))
+
+				if candidate_lots.has([row, column, slot]):
+					# The marker stands on the sidewalk in front of the house,
+					# between its front wall and the kerb, which is where a
+					# driver would actually pull up.
+					var marker_y: float = (
+						top - KERB_STANDOFF if faces_north else bottom + KERB_STANDOFF
+					)
+					candidates.append({
+						"id": "ic_%d%d_%d" % [row, column, slot],
+						"building_id": house_id,
+						"position": Vector2(x0 + house_width * 0.5, marker_y),
+					})
+
+	def.blocks = blocks
+	def.buildings = buildings
+	def.incident_candidates = candidates
+
+	# Hydrants stand at the kerb, spread so no call is a long way from water.
+	# h_station is the one outside the station.
 	def.hydrants = [
-		{"id": "h_station", "position": Vector2(150.0, 230.0)},
-		{"id": "h_fir", "position": Vector2(780.0, 300.0)},
-		{"id": "h_grove", "position": Vector2(1120.0, 700.0)},
-		{"id": "h_elm_south", "position": Vector2(220.0, 780.0)},
-	]
-
-	def.incident_candidates = [
-		{"id": "ic_a1", "building_id": "b_a1", "position": Vector2(370.0, 235.0)},
-		{"id": "ic_b2", "building_id": "b_b2", "position": Vector2(1115.0, 325.0)},
-		{"id": "ic_c2", "building_id": "b_c2", "position": Vector2(615.0, 675.0)},
-		{"id": "ic_d1", "building_id": "b_d1", "position": Vector2(870.0, 585.0)},
+		{"id": "h_station", "position": Vector2(AVENUE_X[0] + HALF_ROAD + KERB_STANDOFF, 700.0)},
+		{"id": "h_ash_fir", "position": Vector2(1700.0, STREET_Y[0] + HALF_ROAD + KERB_STANDOFF)},
+		{"id": "h_birch_west", "position": Vector2(800.0, STREET_Y[1] - HALF_ROAD - KERB_STANDOFF)},
+		{"id": "h_grove_mid", "position": Vector2(AVENUE_X[2] - HALF_ROAD - KERB_STANDOFF, 1500.0)},
+		{"id": "h_cedar_east", "position": Vector2(3000.0, STREET_Y[2] + HALF_ROAD + KERB_STANDOFF)},
+		{"id": "h_dogwood_west", "position": Vector2(900.0, STREET_Y[3] - HALF_ROAD - KERB_STANDOFF)},
+		{"id": "h_hazel_south", "position": Vector2(AVENUE_X[3] - HALF_ROAD - KERB_STANDOFF, 2300.0)},
 	]
 
 	return def
+
+
+## The gaps between a set of parallel road centrelines, as [start, end] pairs,
+## including the strip before the first road and the strip after the last. Given
+## centres at 400 and 1500 with a half width of 140 and a map running 0 to 4000,
+## this returns [0, 260], [540, 1360] and [1640, 4000].
+static func _bands(centres: Array, half_width: float, from: float, to: float) -> Array:
+	var bands: Array = []
+	var cursor: float = from
+	for centre in centres:
+		bands.append([cursor, float(centre) - half_width])
+		cursor = float(centre) + half_width
+	bands.append([cursor, to])
+	return bands
+
+
+## Deterministic, quietly varied colours, so the neighbourhood does not read as
+## one house repeated 36 times without a colour being typed per building.
+static func _yard_color(row: int, column: int) -> Color:
+	var shift: float = float((row * 3 + column) % 4) * 0.018
+	return Color(0.30 + shift, 0.44 + shift * 0.6, 0.28 + shift * 0.4)
+
+
+static func _body_color(row: int, column: int, slot: int) -> Color:
+	const BODIES: Array = [
+		Color(0.80, 0.62, 0.45), Color(0.75, 0.75, 0.70), Color(0.85, 0.80, 0.65),
+		Color(0.70, 0.55, 0.45), Color(0.78, 0.72, 0.60), Color(0.82, 0.66, 0.50),
+	]
+	return BODIES[(row * 7 + column * 3 + slot) % BODIES.size()]
+
+
+static func _roof_color(row: int, column: int, slot: int) -> Color:
+	const ROOFS: Array = [
+		Color(0.55, 0.20, 0.20), Color(0.25, 0.35, 0.55), Color(0.35, 0.45, 0.30),
+		Color(0.45, 0.25, 0.20), Color(0.30, 0.30, 0.40), Color(0.40, 0.30, 0.55),
+	]
+	return ROOFS[(row * 5 + column * 2 + slot * 3) % ROOFS.size()]
 
 
 static func _building(id: String, x0: float, y0: float, x1: float, y1: float, body_color: Color, roof_color: Color) -> Dictionary:

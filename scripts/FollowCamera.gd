@@ -8,9 +8,15 @@ class_name FollowCamera
 ## ignore_rotation would also work, but following by position is explicit and
 ## leaves nothing to inherit by accident.
 
+## Camera zoom. Below 1.0 means the view takes in MORE world, not less. Chosen
+## with the road width: a 280 unit road at 0.9 spans 252 of the 1280 unit design
+## viewport, a little under a fifth of the screen, and the player can see about
+## 700 units up the road ahead, which is roughly three seconds at top speed.
+const ZOOM: float = 0.9
+
 ## How far ahead of the truck the camera leads, in world units at full speed.
 ## Handoff section 4 asks for reasonable forward visibility.
-const LOOK_AHEAD_DISTANCE: float = 90.0
+const LOOK_AHEAD_DISTANCE: float = 220.0
 
 var target: Node2D = null
 
@@ -20,6 +26,7 @@ var _look_ahead: Vector2 = Vector2.ZERO
 func _ready() -> void:
 	rotation = 0.0
 	ignore_rotation = true
+	zoom = Vector2(ZOOM, ZOOM)
 	position_smoothing_enabled = true
 	position_smoothing_speed = 6.0
 	limit_smoothed = true
