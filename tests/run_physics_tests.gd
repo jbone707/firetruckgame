@@ -31,6 +31,8 @@ func _run() -> void:
 	await _check_an_obstacle_blocks_the_stream()
 	await _check_the_stream_stops_at_its_range()
 	await _check_a_shift_starts_and_dispatches_in_the_real_scene()
+	await _check_the_call_arrow_points_at_the_fire_from_any_heading()
+	await _check_the_call_arrow_hides_once_the_fire_is_on_screen()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -316,3 +318,115 @@ func _check_a_shift_starts_and_dispatches_in_the_real_scene() -> void:
 
 	main.queue_free()
 	await physics_frame
+
+
+## The off-screen call arrow, end to end in the real scene, through the same
+## canvas transform the running game uses.
+##
+## Two separate claims. First, that the arrow points at the fire at all: the
+## shipped version pointed at the world origin from every position on the map,
+## because FireIncident left its node at (0, 0) and drew the building's outline
+## in world coordinates from there, so global_position was the same corner of
+## the neighbourhood for every call. Second, that the direction is a property of
+## the world and not of the truck: the camera is north up, so turning the truck
+## must not move the arrow by a single degree.
+func _check_the_call_arrow_points_at_the_fire_from_any_heading() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var truck: Node = world[1]
+
+	main._on_start_shift_pressed()
+	await physics_frame
+	var incident: Node = main._dispatch.active_incident
+
+	_check(
+		incident.global_position.distance_to(incident._center) < 0.01,
+		"a dispatched incident stands where its building stands, not at the world origin"
+			+ " (at %s)" % incident.global_position
+	)
+
+	var compass: Dictionary = {
+		"east": Vector2(1.0, 0.0),
+		"north": Vector2(0.0, -1.0),
+		"west": Vector2(-1.0, 0.0),
+		"south": Vector2(0.0, 1.0),
+	}
+	# Far enough that the fire is off screen whichever way the camera is clamped.
+	var distance: float = 3000.0
+	var first: Dictionary = {}
+
+	# Measured from the middle of the screen, not from the truck. Near a map
+	# edge the camera is clamped and the truck sits off centre, so a fire due
+	# east of the TRUCK is genuinely a few degrees off due east of the SCREEN,
+	# and the arrow is right to say so. The truck is stationary throughout, so
+	# the camera does not lead and this point does not move between headings.
+	for heading in [0.0, PI * 0.5, PI]:
+		for name in compass:
+			var direction: Vector2 = compass[name]
+			incident.global_position = _screen_centre_world(main) + direction * distance
+			truck.rotation = heading
+			await physics_frame
+
+			var state: Dictionary = main._incident_indicator_state(incident.global_position)
+			if not state["shown"]:
+				_check(false, "the arrow must be shown for a fire %s and far away" % name)
+				continue
+			if not first.has(name):
+				first[name] = state["direction"]
+
+			_check(
+				state["direction"].distance_to(direction) < 0.001,
+				"a fire due %s draws the arrow %s at truck heading %.2f"
+					% [name, state["direction"], heading]
+			)
+			_check(
+				first[name].distance_to(state["direction"]) < 0.001,
+				"turning the truck to %.2f does not move the %s arrow" % [heading, name]
+			)
+
+	main.queue_free()
+	await physics_frame
+
+
+## The other half of the rule: on screen, no arrow. The shipped version never
+## hid, because the origin it pointed at was almost never in shot.
+func _check_the_call_arrow_hides_once_the_fire_is_on_screen() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var truck: Node = world[1]
+
+	main._on_start_shift_pressed()
+	await physics_frame
+	var incident: Node = main._dispatch.active_incident
+	var camera: Node = main._camera
+
+	# Straight on top of the truck, which the camera is centred on: as on screen
+	# as anything gets.
+	incident.global_position = truck.global_position
+	camera.snap_to_target()
+	await physics_frame
+	_check(
+		not main._incident_indicator_state(incident.global_position)["shown"],
+		"a fire in the middle of the screen shows no arrow"
+	)
+
+	# And well outside the view, which the arrow does have to catch.
+	incident.global_position = truck.global_position + Vector2(3000.0, 0.0)
+	await physics_frame
+	var state: Dictionary = main._incident_indicator_state(incident.global_position)
+	_check(state["shown"], "a fire 3000 units away shows the arrow")
+	_check(
+		main.get_viewport_rect().has_point(state["position"]),
+		"and draws it inside the viewport at %s" % state["position"]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## The world point the middle of the screen is looking at, taken from the same
+## canvas transform the game reads, so camera lead and the map edge clamp are
+## both already in it.
+func _screen_centre_world(main: Node) -> Vector2:
+	var canvas: Transform2D = main.get_viewport().get_canvas_transform()
+	return canvas.affine_inverse() * (main.get_viewport_rect().size * 0.5)

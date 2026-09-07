@@ -232,30 +232,20 @@ func _update_hud() -> void:
 	var incident: FireIncident = _dispatch.active_incident
 	if incident != null and is_instance_valid(incident) and not incident.is_terminal():
 		_ui.set_margin_seconds(incident.get_escalation_remaining())
-		_ui.set_incident_direction(_screen_direction_to(incident.global_position))
+		_ui.set_incident_indicator(_incident_indicator_state(incident.global_position))
 	else:
 		_ui.set_margin_seconds(0.0)
-		_ui.set_incident_direction(Vector2.ZERO)
+		_ui.set_incident_indicator(IncidentIndicator.hidden())
 
 
-## A unit vector pointing at a world position from the middle of the screen, or
-## zero when that position is comfortably on screen and no arrow is needed.
-func _screen_direction_to(world_position: Vector2) -> Vector2:
-	var viewport_rect: Rect2 = get_viewport_rect()
+## Whether the off-screen arrow is shown for a world position, and where on the
+## screen edge it sits. The camera is north up, so the world-space offset is
+## already the screen-space offset and no truck or camera rotation belongs
+## anywhere in this path. The engine's own canvas transform does the mapping, so
+## camera lead and the map edge clamp are accounted for automatically.
+func _incident_indicator_state(world_position: Vector2) -> Dictionary:
 	var canvas: Transform2D = get_viewport().get_canvas_transform()
-	var screen_point: Vector2 = canvas * world_position
-
-	var inset: Vector2 = viewport_rect.size * 0.12
-	var visible_rect := Rect2(
-		viewport_rect.position + inset, viewport_rect.size - inset * 2.0
-	)
-	if visible_rect.has_point(screen_point):
-		return Vector2.ZERO
-
-	var from_centre: Vector2 = screen_point - viewport_rect.size * 0.5
-	if from_centre.length_squared() < 1.0:
-		return Vector2.ZERO
-	return from_centre.normalized()
+	return IncidentIndicator.evaluate(canvas * world_position, get_viewport_rect())
 
 
 # ---------------------------------------------------------------------------

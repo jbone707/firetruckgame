@@ -19,8 +19,6 @@ const PANEL_WIDTH: float = 460.0
 const BAR_SIZE: Vector2 = Vector2(190.0, 18.0)
 const EDGE_MARGIN: float = 18.0
 
-## How far in from the screen edge the off-screen incident arrow sits.
-const ARROW_INSET: float = 60.0
 
 var _hud: Control
 var _condition_bar: ProgressBar
@@ -47,6 +45,7 @@ var _shop_back_button: Button
 
 var _arrow: Control
 var _arrow_direction: Vector2 = Vector2.ZERO
+var _arrow_position: Vector2 = Vector2.ZERO
 var _arrow_visible: bool = false
 
 
@@ -362,22 +361,20 @@ func set_prompt(text: String) -> void:
 	_prompt_label.text = text
 
 
-## direction is a unit vector in screen space, or zero when the incident is on
-## screen and the arrow should not be drawn.
-func set_incident_direction(direction: Vector2) -> void:
-	_arrow_visible = direction != Vector2.ZERO
-	_arrow_direction = direction
+## Takes an IncidentIndicator.evaluate() result: whether to show the arrow, the
+## screen-space unit vector it points along, and the screen position it sits at.
+## The HUD does no geometry of its own; it only draws what it is handed.
+func set_incident_indicator(state: Dictionary) -> void:
+	_arrow_visible = bool(state.get("shown", false))
+	_arrow_direction = state.get("direction", Vector2.ZERO)
+	_arrow_position = state.get("position", Vector2.ZERO)
 	_arrow.queue_redraw()
 
 
 func _draw_arrow() -> void:
 	if not _arrow_visible or not _hud.visible:
 		return
-	var centre: Vector2 = _arrow.size * 0.5
-	var radius: Vector2 = _arrow.size * 0.5 - Vector2(ARROW_INSET, ARROW_INSET)
-	var tip: Vector2 = centre + Vector2(
-		_arrow_direction.x * radius.x, _arrow_direction.y * radius.y
-	)
+	var tip: Vector2 = _arrow_position
 	var angle: float = _arrow_direction.angle()
 	var points := PackedVector2Array([
 		tip + Vector2(20.0, 0.0).rotated(angle),

@@ -94,6 +94,7 @@ func _dispatch_next() -> void:
 
 	active_incident = incident
 	call_number += 1
+	incident.set_active_call(true)
 	incident.incident_extinguished.connect(_on_incident_extinguished)
 	incident.incident_lost.connect(_on_incident_lost)
 	call_dispatched.emit(call_number, total_calls, incident)
@@ -102,6 +103,7 @@ func _dispatch_next() -> void:
 func _disconnect_active() -> void:
 	if active_incident == null or not is_instance_valid(active_incident):
 		return
+	active_incident.set_active_call(false)
 	if active_incident.incident_extinguished.is_connected(_on_incident_extinguished):
 		active_incident.incident_extinguished.disconnect(_on_incident_extinguished)
 	if active_incident.incident_lost.is_connected(_on_incident_lost):

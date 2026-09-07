@@ -25,6 +25,13 @@ const FIRE_AREA_MARGIN: float = 14.0
 ## effect budget and forbids smoke that obscures the target or the controls.
 const FLAME_COUNT: int = 7
 
+## How far above the fire's centre the destination marker hangs, world units.
+const MARKER_HEIGHT: float = 62.0
+
+## The destination marker's fill. Matches the off-screen arrow so the two read
+## as the same indicator.
+const MARKER_COLOR: Color = Color(1.0, 0.55, 0.2, 0.95)
+
 var balance: Node = null
 
 var incident_id: String = ""
@@ -36,6 +43,7 @@ var escalation: float = 0.0
 var escalation_limit: float = 0.0
 
 var _terminal: bool = false
+var _is_active_call: bool = false
 var _flame_phase: float = 0.0
 var _flame_seeds: Array[Vector2] = []
 var _center: Vector2 = Vector2.ZERO
@@ -71,15 +79,26 @@ func setup(id: String, from_building_id: String, polygon: PackedVector2Array) ->
 	if not grown.is_empty():
 		shape_polygon = grown[0]
 
-	var collision_polygon := CollisionPolygon2D.new()
-	collision_polygon.polygon = shape_polygon
-	add_child(collision_polygon)
-
 	_center = Vector2.ZERO
 	for point in shape_polygon:
 		_center += point
 	if shape_polygon.size() > 0:
 		_center /= float(shape_polygon.size())
+
+	# The node itself has to stand where the fire stands. It used to be left at
+	# the world origin with the building's world-space outline hung off it as a
+	# child collision shape, which drew and collided correctly but left
+	# global_position reading (0, 0) for every incident on the map. Anything
+	# that asked this node where it was, the off-screen arrow included, was
+	# told "the north-west corner of the neighbourhood", forever.
+	global_position = _center
+
+	var collision_polygon := CollisionPolygon2D.new()
+	var local_polygon := PackedVector2Array()
+	for point in shape_polygon:
+		local_polygon.append(point - _center)
+	collision_polygon.polygon = local_polygon
+	add_child(collision_polygon)
 
 	_seed_flames(shape_polygon)
 	queue_redraw()
@@ -109,6 +128,20 @@ func apply_suppression(amount: float) -> float:
 	if health <= 0.0:
 		_finish(true)
 	return absorbed
+
+
+## Marks this incident as the call the player has been sent to. Only the active
+## call carries a destination marker, so a cleared fire still on screen through
+## the confirmation pause does not compete with the next one.
+func set_active_call(active: bool) -> void:
+	if _is_active_call == active:
+		return
+	_is_active_call = active
+	queue_redraw()
+
+
+func is_active_call() -> bool:
+	return _is_active_call
 
 
 func get_health_ratio() -> float:
@@ -180,3 +213,24 @@ func _draw() -> void:
 		var inner: Color = Color(1.0, lerpf(0.9, 0.7, urgency), 0.45, 0.9)
 		draw_circle(seed_point, size, outer)
 		draw_circle(seed_point - Vector2(0.0, size * 0.35), size * 0.5, inner)
+
+	if _is_active_call:
+		_draw_destination_marker()
+
+
+## A chevron hanging over the burning building: the on-screen half of the pair
+## the off-screen arrow completes. Drawn above the fire rather than over it so
+## the flames and the building stay readable (handoff section 5's effect budget).
+func _draw_destination_marker() -> void:
+	var anchor := Vector2(0.0, -MARKER_HEIGHT + sin(_flame_phase * 2.4) * 3.0)
+	var body := PackedVector2Array([
+		anchor + Vector2(-13.0, -18.0),
+		anchor + Vector2(13.0, -18.0),
+		anchor,
+	])
+	draw_colored_polygon(body, MARKER_COLOR)
+	draw_polyline(
+		PackedVector2Array([body[0], body[1], body[2], body[0]]),
+		Color(0.1, 0.06, 0.02, 0.9),
+		2.0
+	)
