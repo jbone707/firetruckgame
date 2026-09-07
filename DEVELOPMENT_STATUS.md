@@ -293,3 +293,40 @@ The first is fast and covers rules. The second boots the real main scene and ste
 so it is slower and covers integration. Both exit nonzero on any failure.
 
 Next milestone: Part 4, water, fire and hydrants.
+
+## Part 4: Water, Fire, Hydrants
+
+Added `scripts/WaterSystem.gd`, `scripts/FireIncident.gd`, `scripts/Hydrant.gd`,
+`tests/test_water_and_hydrant.gd`, and three targeting checks in
+`tests/run_physics_tests.gd`. `MapBuilder` no longer draws its own hydrant and incident
+dots, because hydrants are now real nodes with an interaction radius and only the
+dispatched call should be marked.
+
+The turret is mounted on the truck and aims by world position, set from Main with
+`get_global_mouse_position()`, which already accounts for the canvas transform and so
+stays correct under the moving camera.
+
+A burning building would normally shield the fire inside it, since the building's own
+collision is on the same layer that occludes the stream. `FireIncident` grows its hittable
+area 14 units past the building outline, so the fire's edge sits in front of the wall and
+the call can actually be cleared from the street. `run_physics_tests.gd` covers this, plus
+occlusion by an obstacle and the stream's range limit, all against real physics.
+
+### Two more bugs that only physics could show
+
+Parking the truck exactly on an incident marker put its 90x40 body inside the building
+wall. The depenetration shove that followed was being adopted wholesale by Part 3's
+`velocity = get_real_velocity()` line, and the truck flew off across the map under its own
+steam. `TruckController` now clamps the adopted velocity so a move can never leave the
+truck faster than it entered: being pushed out of geometry stops it instead of firing it
+away.
+
+The occlusion check itself was wrong before the code was. Its blocker wall is a tall thin
+box whose long axis is local Y, so rotating it by the aim angle plus ninety degrees, which
+is the intuitive thing to write, left it parallel to the stream and blocking nothing. The
+rotation is the aim angle itself.
+
+Both checkers were proven by deliberate failure: removing the world_static bit from the
+stream's query mask makes the occlusion check report health 80.0 and exit 1.
+
+Next milestone: Part 5, session, dispatch, HUD, shop and save.

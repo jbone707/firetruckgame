@@ -56,11 +56,12 @@ func build(definition: MapDefinition) -> void:
 	for building in definition.buildings:
 		_build_building(buildings_root, building)
 
-	for hydrant in definition.hydrants:
-		_build_hydrant_marker(markers_root, hydrant)
-
-	for incident in definition.incident_candidates:
-		_build_incident_marker(markers_root, incident)
+	# Hydrants and incident candidates are no longer drawn here. Part 4 gives
+	# hydrants a real node with an interaction radius, and Part 5 marks only the
+	# one call that is actually dispatched. Drawing them here as well would put
+	# a second dot under every hydrant and mark three buildings the player has
+	# not been sent to. The two _build_*_marker helpers below are kept because
+	# they are what a future map preview tool would want.
 
 	_build_edge_walls(walls_root, definition.world_bounds)
 

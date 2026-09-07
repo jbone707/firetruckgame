@@ -112,7 +112,18 @@ func _physics_process(delta: float) -> void:
 	# collision. Reconciling against the real motion is what makes "speed lost
 	# into the normal" mean anything, and the automated 60 frame check cannot
 	# see this because it never runs Godot's physics.
-	velocity = get_real_velocity()
+	#
+	# Clamped, though, because adopting the real motion wholesale also adopts
+	# depenetration. A truck that starts a frame overlapping a building is shoved
+	# clear hard, and taking that shove as velocity launched it across the map
+	# under its own steam. A move can never leave the truck faster than it
+	# entered, so being pushed out of geometry stops the truck instead of firing
+	# it away.
+	var real_velocity: Vector2 = get_real_velocity()
+	var entry_speed: float = pre_move_velocity.length()
+	if real_velocity.length() > entry_speed:
+		real_velocity = real_velocity.normalized() * entry_speed
+	velocity = real_velocity
 
 
 func _apply_steering(delta: float) -> void:

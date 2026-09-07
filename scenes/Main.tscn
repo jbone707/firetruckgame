@@ -15,9 +15,20 @@ unique_name_in_owner = true
 process_mode = 1
 script = ExtResource("4_map")
 
+[node name="Hydrants" type="Node2D" parent="."]
+unique_name_in_owner = true
+process_mode = 1
+z_index = 3
+
+[node name="Incidents" type="Node2D" parent="."]
+unique_name_in_owner = true
+process_mode = 1
+z_index = 4
+
 [node name="Truck" parent="." instance=ExtResource("2_truck")]
 unique_name_in_owner = true
 process_mode = 1
+z_index = 6
 
 [node name="Camera" type="Camera2D" parent="."]
 unique_name_in_owner = true
