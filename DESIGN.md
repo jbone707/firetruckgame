@@ -91,6 +91,12 @@ instead.
 
 ## The Map
 
+There are two maps, and the home menu asks which one before every shift. The
+choice is remembered in the save file, and a save that names no map, or names
+one this build does not ship, opens on the fictional neighbourhood.
+
+### Elm Grove, the fictional neighbourhood
+
 The neighbourhood, "Elm Grove", is an entirely fictional grid 4000 by 3000
 units across: four named streets running east-west (Ash, Birch, Cedar and
 Dogwood Streets) crossed by four running north-south (Elm, Fir, Grove and
@@ -105,33 +111,67 @@ units/second). At the camera's zoom a road spans about a fifth of the screen
 and the player sees roughly a third of the map's width at a time, so a street
 reads as a street rather than as a line drawn on a field.
 
-The land between the roads is a concrete sidewalk band around a garden, with
-houses on lots facing the streets. The sidewalk is drivable: you can mount the
-kerb to get round something, or to pull level with a hydrant, and in this build
-it costs nothing at all, no speed penalty and no damage. The gardens behind
-their fences are not drivable, and neither are the houses on them, so the
-fence, not the kerb, is the line the engine cannot cross. Blocks tile the whole
-neighbourhood, verges at the boundary included, so there is no unclaimed ground
-anywhere. The gardens' collision sits on its own physics layer, which the truck
-collides with and the water stream passes through, because a stream clears a
-fence and a front lawn and does not clear a house.
+### Windsor test area, imported from OpenStreetMap
 
-The map's layout is stored as data (`MapDefinition`, saved as
-`resources/neighbourhood.tres`) separately from the code that draws and
-simulates it (`MapBuilder`): positions, road centerlines and widths,
-building polygons, station spawn, hydrant locations and incident-candidate
-markers, all with stable ids and all in local world coordinates. A future
-real-world importer only needs to produce another `MapDefinition` in this
-same shape; nothing else in the game would need to change. `MapBuilder` builds
-the whole thing: the road network as one continuous dark asphalt surface with
-no seam at any junction, kerb lines and a dashed centre line, the blocks with
-their sidewalks and gardens, the houses with contrasting roofs, and the four
-map-edge walls.
+The second map is built from OpenStreetMap data for a 500 by 380 metre box
+around Shadetree Drive and Smoketree Street in Windsor, California: 12,499 by
+9,500 units at 25 units per metre, 42 road segments with their real names, 19
+junctions, 19 dead ends and 238 real building footprints.
+
+**It is not an accurate map of Windsor and is never presented as one.** The
+streets and the building outlines are real; 17 lots, all 12 hydrants and every
+colour are invented, because the source data does not contain them. Every
+feature in the resource carries a `source` of `osm` or `synthetic` so the two
+can never be confused, and the map select screen says both things before the
+player picks it: "Streets from OpenStreetMap; buildings partly synthetic" and
+"Hydrant locations are placeholders, not real".
+
+The data was downloaded once, on 2026-09-07, through the Overpass API. The
+response, the exact query, the importer and the generated map are all committed.
+The game makes no network call at any time and uses no map tiles or rendered map
+images from any provider. `ATTRIBUTION.md` records the licence and the terms;
+the credit line and the OpenStreetMap copyright URL are shown in-game on the
+Data and Credits screen, reachable from the home menu.
+
+### How both maps are drawn and collided
+
+The land between the roads is a concrete sidewalk band around the lots, with
+houses on them. The sidewalk is drivable: you can mount the kerb to get round
+something, or to pull level with a hydrant, and in this build it costs nothing
+at all, no speed penalty and no damage. The land behind the fences is not
+drivable, and neither are the houses on it, so the fence, not the kerb, is the
+line the engine cannot cross. The lots' collision sits on its own physics layer,
+which the truck collides with and the water stream passes through, because a
+stream clears a fence and a front lawn and does not clear a house.
+
+None of that assumes a road is straight or axis-aligned. `MapGeometry` derives
+every shape on the ground from the road network alone: a slab per road segment,
+a convex fill at every junction, and then the land found by cutting those slabs
+out of the map rectangle, once without the sidewalk to give the kerb line and
+once with it to give the fence line. A cul-de-sac, a bend and two streets
+meeting at 30 degrees are drawn by the same code that draws a grid, and the
+fictional map's fence comes out at exactly the coordinate its hand-built
+rectangles used to specify, which is how the rewrite was checked.
+
+That works because the road network reaches the edge of the map, so each cut
+divides the land rather than punching a hole in it. `MapValidator` checks
+exactly that, along with connectivity from the spawn, every hydrant and incident
+candidate standing at a reachable kerb, a minimum road width, roads only
+overlapping at junctions, and no building on the pavement. Both maps pass all
+six rules.
+
+A map's layout is stored as data (`MapDefinition`, saved as a `.tres`)
+separately from the code that draws and simulates it (`MapBuilder`): road
+centrelines and widths, building polygons, station spawn, hydrant locations and
+incident-candidate markers, all with stable ids and all in local world
+coordinates. Adding a third map means producing another `MapDefinition` and
+listing it in `MapCatalogue`; nothing else in the game changes.
 
 ## What Is Actually Built
 
 Everything above this line is implemented and running as of the final commit of
-this first playable build: the neighbourhood and its collision, the truck, the
+this build: both maps and their collision, the home menu and map choice, the
+Data and Credits screen, the truck, the
 north up camera, impact damage, pause, the water tank and turret, fire incidents
 with separate health and escalation, hydrants, sequential dispatch, the HUD, the
 results screen, the shop and the save file. Earlier drafts of this document
@@ -149,10 +189,11 @@ The following are part of the long-term vision but are explicitly out of
 scope for this build, and nothing here should be read as a claim that they
 exist yet:
 
-- **Real-map import.** Generating a playable neighborhood from an actual
-  place, starting with Windsor, California, preserving real streets and
-  building footprints. This build's neighborhood is entirely fictional and is
-  not a stand-in for, or an approximation of, any real location.
+- **More real areas.** The pipeline exists and one area is imported, described
+  under "The Map" above. What is not built is a second real area, any way to
+  import one without running the tool by hand, or real hydrant locations: the
+  twelve on the Windsor map are invented and the game says so wherever it
+  offers that map.
 - **Traffic and signals.** Moving traffic, working traffic signals, and later
   upgrades that improve how traffic yields to the engine.
 - **Pedestrians.** People walking the neighbourhood, on the sidewalks and

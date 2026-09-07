@@ -16,7 +16,25 @@ screen through three calls to the results screen and the shop.
    click Import & Edit.
 4. Once the editor opens, press F5, or click the Run Project button, the play
    arrow at the top right, to launch the game.
-5. Click Start shift.
+5. Click Start shift, then pick a map.
+
+## The Two Maps
+
+Start shift asks which neighbourhood to run the shift on. Your choice is
+remembered for next time.
+
+- **Elm Grove** is invented. It is not a real place.
+- **Windsor test area** is built from OpenStreetMap data for a 500 by 380 metre
+  box around Shadetree Drive and Smoketree Street in Windsor, California. The
+  streets and most building outlines are real. **It is not an accurate map of
+  Windsor**: some lots and every one of the twelve hydrants are invented,
+  because the source data does not contain them.
+
+Map data © OpenStreetMap contributors, available under the Open Data Commons
+Open Database License (ODbL). See https://www.openstreetmap.org/copyright, the
+Data and Credits screen on the home menu, and `ATTRIBUTION.md` for the terms and
+what was done with the data. The game makes no network calls and uses no map
+images.
 
 You do not need to create any scenes, attach any scripts, or set up any controls
 yourself. All of that is already in the project files.
@@ -68,7 +86,39 @@ Two headless test runners, both of which exit nonzero if anything fails:
     "C:\Users\james\Downloads\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe" --headless --path . --script res://tests/run_physics_tests.gd
 
 The first is fast and covers rules. The second boots the real scene and steps
-physics, so it takes a little longer and covers integration.
+physics, so it takes a little longer and covers integration; it runs several of
+its checks on both maps. Neither touches your save file.
+
+Every map in `resources/` also has to pass six structural rules. That runs
+inside the unit suite, and separately as a tool that can be pointed at a map
+that is not committed yet:
+
+    "C:\Users\james\Downloads\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe" --headless --path . --script res://tools/validate_map.gd
+
+Add `-- res://resources/windsor_shadetree.tres` to check one map instead of all
+of them. It exits nonzero if any rule fails on any map.
+
+## Rebuilding the Maps
+
+Neither of these needs to be run to play the game. Both write into the
+repository, so they are tools and are deliberately not part of either runner.
+
+Elm Grove is generated from one function, so a change to the layout is a change
+to `MapDefinition.create_fictional_neighbourhood()` rather than to a hundred
+hand-edited coordinates:
+
+    "C:\Users\james\Downloads\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe" --headless --path . --script res://tools/regenerate_map.gd
+
+The Windsor map is rebuilt from the OpenStreetMap response already committed
+under `data/source/`. It reads that file and nothing else, so it works offline
+and produces the same resource every time:
+
+    "C:\Users\james\Downloads\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe" --headless --path . --script res://tools/import_osm.gd
+
+Run the validator afterwards either way. If you ever need to download the data
+again rather than re-import it, the exact Overpass query is committed at
+`data/source/windsor_shadetree_smoketree.overpassql` and `ATTRIBUTION.md`
+records the API usage policy that applies.
 
 ## Project Status
 

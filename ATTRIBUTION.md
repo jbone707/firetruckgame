@@ -11,9 +11,16 @@ decides how the licence applies to this project.
 
 This line, together with a statement that the data is available under the Open Database
 License, must appear wherever the data is used. In the game it appears on the Data and
-Credits screen reachable from the home menu, alongside the licence URL:
+Credits screen, reachable from the home menu, alongside the licence URL:
 
     https://www.openstreetmap.org/copyright
+
+That screen is not built from this file. It reads the credit line, the licence name and the
+URL out of the map resource's own `source_metadata`, which `tools/import_osm.gd` writes, so
+the notice travels with the data rather than sitting in a layout that could be edited apart
+from it. `tests/test_session_and_save.gd` asserts that all three reach the screen, and
+`tests/test_osm_import.gd` asserts the credit line is these exact characters, copyright
+symbol included. The three places that have to agree therefore cannot drift apart silently.
 
 ## Source
 
@@ -94,8 +101,18 @@ Stated plainly so the position is on the record, not to settle it:
   centrelines and building footprints come from OSM; hydrants, some lots, and other details
   are synthesized because the source data does not contain them. Every feature in the
   generated resource is tagged `source: "osm"` or `source: "synthetic"` so the two are never
-  confused. The in-game name for it is "Windsor test area", with the subtitle "Streets from
-  OpenStreetMap; buildings and hydrants partly synthetic".
+  confused. The in-game name for it is "Windsor test area", and the map select screen prints
+  these two lines under it, verbatim:
+
+      Streets from OpenStreetMap; buildings partly synthetic
+      Hydrant locations are placeholders, not real
+
+  An earlier draft of this file recorded a single line, "Streets from OpenStreetMap;
+  buildings and hydrants partly synthetic". That was replaced because "partly synthetic"
+  understates the hydrants: not some of them are invented, all twelve are, and the sentence
+  a player reads should say so plainly. The two lines above are asserted word for word by
+  `tests/test_session_and_save.gd`, so rewording either one fails the suite rather than
+  quietly changing what the game claims.
 
 ## Overpass API usage
 
