@@ -18,9 +18,17 @@ const ZOOM: float = 0.9
 ## Handoff section 4 asks for reasonable forward visibility.
 const LOOK_AHEAD_DISTANCE: float = 220.0
 
+## Impact shake: how far the view is thrown at a full speed crash, world units,
+## and how long it takes to settle. Small and short on purpose, since the player
+## is steering while it happens.
+const MAX_SHAKE: float = 16.0
+const SHAKE_SECONDS: float = 0.28
+
 var target: Node2D = null
 
 var _look_ahead: Vector2 = Vector2.ZERO
+var _shake_remaining: float = 0.0
+var _shake_strength: float = 0.0
 
 
 func _ready() -> void:
@@ -46,6 +54,8 @@ func snap_to_target() -> void:
 	if target == null:
 		return
 	_look_ahead = Vector2.ZERO
+	_shake_remaining = 0.0
+	_shake_strength = 0.0
 	global_position = target.global_position
 	reset_smoothing()
 
@@ -65,4 +75,29 @@ func _physics_process(delta: float) -> void:
 	# Ease the lead in rather than snapping it, so a hard turn does not whip
 	# the view across the screen.
 	_look_ahead = _look_ahead.lerp(desired_look_ahead, clampf(delta * 3.0, 0.0, 1.0))
-	global_position = target.global_position + _look_ahead
+
+	var offset_shake: Vector2 = Vector2.ZERO
+	if _shake_remaining > 0.0:
+		_shake_remaining = maxf(_shake_remaining - delta, 0.0)
+		var fade: float = _shake_remaining / SHAKE_SECONDS
+		offset_shake = Vector2(
+			randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)
+		) * _shake_strength * fade
+		if _shake_remaining <= 0.0:
+			_shake_strength = 0.0
+	global_position = target.global_position + _look_ahead + offset_shake
+
+
+## A short shake, so a crash is something the player sees happen rather than
+## something they infer from a bar moving in the corner. Amount is the impact
+## speed; the shake is scaled from it and capped, so a scrape is a twitch and a
+## head-on is a jolt.
+##
+## Deliberately brief and positional only. It never rotates the camera, because
+## the whole reason this camera is a sibling of the truck rather than a child is
+## to keep the world north up, and a rotating shake would undo that for as long
+## as it lasted.
+func shake(impact_speed: float) -> void:
+	var strength: float = clampf(impact_speed / 250.0, 0.0, 1.0) * MAX_SHAKE
+	_shake_remaining = SHAKE_SECONDS
+	_shake_strength = maxf(_shake_strength, strength)

@@ -54,12 +54,18 @@ var high_speed_steering_factor: float = 0.45 # invented default, not from handof
 var collision_damage_threshold: float = 60.0 # invented default, not from handoff
 
 ## Damage dealt per world unit/second of impact speed above the threshold.
-## Measured against the real thing rather than guessed: a flat-out crash into a
-## wall registers about 200 units/second into the normal, so this deals roughly
-## 42 of the 100 starting condition. A top speed crash is meant to hurt badly
-## without ending the shift outright. At the first draft's 0.6 a single wall
-## strike took 85 condition, which made one mistake effectively fatal.
-var collision_damage_scale: float = 0.3 # invented default, not from handoff
+##
+## Measured against the real thing rather than guessed, twice. At the first
+## draft's 0.6 a single wall strike took 85 condition and one mistake was
+## effectively fatal. 0.3 was then set against an impact figure that turned out
+## to be understated, because the old measurement charged one frame of a
+## two-frame stop (see TruckController._strongest_impact_speed). With the impact
+## speed read correctly, a flat-out head-on registers the full 250 units/second
+## and 0.3 would cost 57 of the 100 starting condition, so two of them would end
+## a shift. 0.25 costs 47.5, which leaves a player who has crashed badly twice
+## with 5 condition and a shift they can still finish, and a third crash does
+## end it. That is the intended shape: punishing, survivable, not endless.
+var collision_damage_scale: float = 0.25 # invented default, not from handoff
 
 ## Minimum time, in seconds, between damage applications from the same
 ## resting contact so leaning on a wall does not deduct damage every frame.

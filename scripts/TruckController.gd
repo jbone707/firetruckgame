@@ -182,23 +182,31 @@ func _apply_drive(delta: float) -> void:
 	velocity = forward * forward_speed
 
 
-## Speed lost into a wall normal on this frame, across every slide contact.
+## How fast the truck was closing on a wall as it hit it, across every slide
+## contact: the speed it arrived at, measured into the contact normal.
 ##
-## This is a change in velocity, not a raw speed, and that distinction is the
-## whole reason resting against a wall does not bleed condition. On the frame
-## of a crash the truck loses its entire closing speed into the normal. On the
-## frames after it, while the player holds the throttle into the same wall, the
-## only speed available to lose is the acceleration gained since the previous
-## frame, a few units per second, which falls under the damage threshold.
+## This used to be the speed LOST into the normal on the contact frame, which
+## sounded more careful and was wrong. A crash at speed is not resolved in one
+## physics frame: the solver takes two, and the 0.5 second contact cooldown then
+## swallows the second. Which fraction of the stop landed inside the first frame
+## depended on exactly where the truck was when it touched, so the same 250
+## unit/second head-on cost 42.9 condition after a 140 unit run-up and 12.2
+## after a 400 unit one. Cost tracked sub-frame alignment rather than severity,
+## and the long run-up, which is the common case on a map of long straights, was
+## the cheap one. Both figures were measured.
+##
+## Reading the arrival speed instead makes a crash cost what the crash was worth.
+## Resting against a wall afterwards is still free: the velocity reconciliation
+## at the end of _physics_process zeroes the truck against the wall, so the next
+## frame arrives carrying only the acceleration gained since, a few units per
+## second, far under the damage threshold. A glancing blow is still cheap too,
+## because only the component into the normal counts.
 func _strongest_impact_speed(pre_move_velocity: Vector2) -> float:
-	var post_move_velocity: Vector2 = get_real_velocity()
 	var strongest: float = 0.0
 	for index in range(get_slide_collision_count()):
 		var collision: KinematicCollision2D = get_slide_collision(index)
 		var normal: Vector2 = collision.get_normal()
-		var closing_before: float = maxf(-pre_move_velocity.dot(normal), 0.0)
-		var closing_after: float = maxf(-post_move_velocity.dot(normal), 0.0)
-		strongest = maxf(strongest, closing_before - closing_after)
+		strongest = maxf(strongest, maxf(-pre_move_velocity.dot(normal), 0.0))
 	return strongest
 
 

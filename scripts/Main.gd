@@ -67,6 +67,9 @@ func _ready() -> void:
 	_session.credits_changed.connect(_ui.set_credits)
 	_dispatch.call_dispatched.connect(_on_call_dispatched)
 	_truck.condition_changed.connect(_ui.set_condition)
+	# A crash should be something the player sees, not only something the
+	# condition bar reports after the fact.
+	_truck.truck_damaged.connect(_on_truck_damaged)
 	_water.water_changed.connect(_ui.set_water)
 
 	_ui.set_credits(_session.get_credits())
@@ -243,6 +246,10 @@ func _compose_prompt(hydrant_prompt: int) -> String:
 	if _water.is_suppressing():
 		return "Knocking it down"
 	return ""
+
+
+func _on_truck_damaged(_amount: float, impact_speed: float) -> void:
+	_camera.shake(impact_speed)
 
 
 func _update_hud() -> void:
