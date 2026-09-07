@@ -82,11 +82,6 @@ return_to_station={
 ]
 }
 
-[rendering]
-
-renderer/rendering_method="gl_compatibility"
-renderer/rendering_method.mobile="gl_compatibility"
-
 [layer_names]
 
 2d_physics/layer_1="world_static"
@@ -94,3 +89,8 @@ renderer/rendering_method.mobile="gl_compatibility"
 2d_physics/layer_3="fire_target"
 2d_physics/layer_4="hydrant"
 2d_physics/layer_5="world_lot"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
