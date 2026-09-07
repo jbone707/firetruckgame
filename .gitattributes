@@ -1,0 +1,4 @@
+# The committed OpenStreetMap response is the raw bytes the Overpass API
+# returned. Git must not rewrite its line endings: the file is evidence of what
+# was downloaded, and the importer's idempotence check hashes it.
+data/source/** -text
