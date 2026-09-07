@@ -35,6 +35,7 @@ func _run() -> void:
 	await _check_the_call_arrow_hides_once_the_fire_is_on_screen()
 	await _check_an_empty_lot_stops_the_truck()
 	await _check_every_approach_to_a_hydrant_hooks_up()
+	await _check_the_narrowest_road_the_truck_can_turn_in()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -602,3 +603,191 @@ func _check_every_approach_to_a_hydrant_hooks_up() -> void:
 
 	main.queue_free()
 	await physics_frame
+
+
+# ---------------------------------------------------------------------------
+# How narrow a road the truck can actually turn a corner in.
+#
+# This is a MEASUREMENT, not an assertion about a particular map. The validator
+# needs a number for "a road narrow enough that the truck cannot get round the
+# corner", and inventing one from the truck's length and steering rate would be
+# arithmetic about a physics engine rather than an observation of it. So the
+# corner is built, driven, and narrowed until the turn stops working, and the
+# width where it stops is printed and then asserted against both maps.
+#
+# The rig is an L: a road running east that ends at a road running south, with
+# the outside of the corner fenced off, which is the tightest 90 degrees a
+# player can be asked to take. The drivable corridor is the road plus the
+# sidewalk band on each side, exactly as in the game, because the sidewalk is
+# drivable there too and pretending otherwise would measure a corner the player
+# never actually meets.
+# ---------------------------------------------------------------------------
+
+## Where the two roads of the rig meet, and how big the rig is.
+const CORNER: Vector2 = Vector2(2000.0, 2000.0)
+const RIG_EXTENT: float = 4000.0
+
+## Cornering speed, as a fraction of top speed. A fire engine does not take a
+## residential corner flat out, and measuring at top speed would demand roads
+## wide enough for a manoeuvre no one performs. 0.4 of 250 is 100 units/second.
+const CORNER_SPEED_FRACTION: float = 0.4
+
+## Widths swept, and the step between them. Descending, stopping at the first
+## width the truck cannot get round at any turn-in point.
+const SWEEP_FROM_WIDTH: float = 320.0
+const SWEEP_TO_WIDTH: float = 20.0
+const SWEEP_STEP: float = 20.0
+
+## Where the driver starts turning, as the truck centre's offset from the
+## junction centre along the approach. Swept, because the question is whether
+## the corner CAN be taken, not whether one particular turn-in policy takes it.
+##
+## Measured from the junction centre rather than from the kerb because the
+## truck's turning circle at this speed is about 55 units, far tighter than any
+## road here is wide, so the right moment to turn is set by the corner and not
+## by the road width. Turning in at the kerb of a wide road, as this first did,
+## simply drives into the block on the inside of the bend.
+const TURN_IN_OFFSETS: Array[float] = [-160.0, -120.0, -80.0, -40.0, 0.0, 40.0]
+
+## How long one attempt is given before it counts as failed.
+const CORNER_ATTEMPT_SECONDS: float = 12.0
+
+
+func _check_the_narrowest_road_the_truck_can_turn_in() -> void:
+	var narrowest_that_works: float = -1.0
+	var widest_that_fails: float = -1.0
+	var width: float = SWEEP_FROM_WIDTH
+	while width >= SWEEP_TO_WIDTH:
+		var made_it: bool = false
+		for turn_in in TURN_IN_OFFSETS:
+			if await _try_the_corner(width, turn_in):
+				made_it = true
+				break
+		if not made_it:
+			widest_that_fails = width
+			break
+		narrowest_that_works = width
+		width -= SWEEP_STEP
+
+	_check(
+		narrowest_that_works > 0.0,
+		"the truck can turn a 90 degree corner at some road width in the sweep"
+	)
+	if narrowest_that_works <= 0.0:
+		return
+
+	if widest_that_fails > 0.0:
+		print("     measured: the truck turns the corner at %.0f units and cannot at %.0f, driving %.0f units/second" % [
+			narrowest_that_works, widest_that_fails, 250.0 * CORNER_SPEED_FRACTION,
+		])
+	else:
+		# Said plainly rather than reported as a measured limit: no width in the
+		# sweep defeated the turn, so this is a floor on the answer and not the
+		# answer. The truck circles in about 55 units at this speed, which is
+		# tighter than any road on either map, so road width is simply not what
+		# stops it cornering.
+		print("     measured: the truck turned the corner at every width down to %.0f units, the narrowest tried, driving %.0f units/second; no width in the sweep defeated it" % [
+			narrowest_that_works, 250.0 * CORNER_SPEED_FRACTION,
+		])
+
+	# The number the validator holds both maps to. The sweep does not derive it
+	# (see MapValidator.MIN_TURNABLE_ROAD_WIDTH for why it is a chosen floor
+	# rather than a measured limit), but it can still catch it going stale: if
+	# the truck ever becomes unable to corner at a width this rule accepts, this
+	# fails and says so.
+	_check(
+		narrowest_that_works <= MapValidator.MIN_TURNABLE_ROAD_WIDTH,
+		"MapValidator.MIN_TURNABLE_ROAD_WIDTH (%.0f) is not below the narrowest width driven successfully (%.0f)"
+			% [MapValidator.MIN_TURNABLE_ROAD_WIDTH, narrowest_that_works]
+	)
+
+
+## One attempt at the corner. True when the truck ends up down the second road
+## undamaged.
+func _try_the_corner(road_width: float, turn_in_offset: float) -> bool:
+	var world := Node2D.new()
+	root.add_child(world)
+
+	var builder := MapBuilder.new()
+	world.add_child(builder)
+	builder.build(_corner_map(road_width))
+
+	var truck: Node = load("res://scenes/Truck.tscn").instantiate()
+	world.add_child(truck)
+	await physics_frame
+
+	var half: float = road_width * 0.5
+	var target_speed: float = truck.balance.forward_max_speed * CORNER_SPEED_FRACTION
+
+	# Started already at cornering speed, 400 units short of the junction. The
+	# first version accelerated from rest 800 units out, which spent most of the
+	# attempt on the approach and failed every width by running out of time
+	# rather than by running out of road.
+	truck.global_position = Vector2(CORNER.x - 400.0, CORNER.y)
+	truck.rotation = 0.0
+	truck.velocity = Vector2(target_speed, 0.0)
+	truck.condition = truck.max_condition
+
+	# The corridor the truck has to end up in, which is the road plus the
+	# drivable sidewalk on each side, minus its own half width so the check is
+	# about the body and not the centre point.
+	var corridor: float = half + MapBuilder.SIDEWALK_WIDTH - truck.get_collision_half_extents().y
+	var finish_y: float = CORNER.y + half + 300.0
+
+	var succeeded: bool = false
+	for _frame in range(int(CORNER_ATTEMPT_SECONDS * PHYSICS_FPS)):
+		var throttle: float = 1.0 if truck.get_forward_speed() < target_speed else 0.0
+		var turning: bool = truck.global_position.x >= CORNER.x + turn_in_offset
+		# Steer toward due south and then hold it, rather than holding full lock.
+		# Full lock all the way round is not "taking the corner": the truck's
+		# turning circle is tight enough that it simply carries on through 180
+		# degrees and comes back up the road it arrived on, which fails at every
+		# width and measures nothing.
+		var steering: float = 0.0
+		if turning:
+			steering = clampf(angle_difference(truck.rotation, PI / 2.0) * 2.0, -1.0, 1.0)
+		truck.set_drive_intent(throttle, steering, false)
+		await physics_frame
+
+		if truck.condition < truck.max_condition:
+			break
+		if truck.global_position.y >= finish_y and absf(truck.global_position.x - CORNER.x) <= corridor:
+			succeeded = true
+			break
+
+	world.queue_free()
+	await physics_frame
+	return succeeded
+
+
+## The rig: a road east into a road south, with the land around them fenced.
+## Built so the two road rectangles cover the corner square between them with
+## nothing uncovered, or the truck could cut across a hole in the map.
+static func _corner_map(width: float) -> MapDefinition:
+	var half: float = width * 0.5
+	var yard := Color(0.30, 0.44, 0.28)
+
+	var definition := MapDefinition.new()
+	definition.map_id = "turn_rig"
+	definition.display_name = "Turn Rig"
+	definition.world_bounds = Rect2(0.0, 0.0, RIG_EXTENT, RIG_EXTENT)
+	definition.station_spawn_position = Vector2(400.0, CORNER.y)
+	definition.roads = [
+		{
+			"id": "r_approach", "name": "Approach",
+			"points": PackedVector2Array([Vector2(0.0, CORNER.y), Vector2(CORNER.x + half, CORNER.y)]),
+			"width": width, "source": "synthetic", "osm_id": "",
+		},
+		{
+			"id": "r_exit", "name": "Exit",
+			"points": PackedVector2Array([Vector2(CORNER.x, CORNER.y - half), Vector2(CORNER.x, RIG_EXTENT)]),
+			"width": width, "source": "synthetic", "osm_id": "",
+		},
+	]
+	definition.blocks = [
+		{"id": "blk_nw", "rect": Rect2(0.0, 0.0, CORNER.x - half, CORNER.y - half), "yard_color": yard},
+		{"id": "blk_sw", "rect": Rect2(0.0, CORNER.y + half, CORNER.x - half, RIG_EXTENT - CORNER.y - half), "yard_color": yard},
+		{"id": "blk_n", "rect": Rect2(CORNER.x - half, 0.0, width, CORNER.y - half), "yard_color": yard},
+		{"id": "blk_e", "rect": Rect2(CORNER.x + half, 0.0, RIG_EXTENT - CORNER.x - half, RIG_EXTENT), "yard_color": yard},
+	]
+	return definition

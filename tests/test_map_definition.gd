@@ -239,3 +239,91 @@ func _find_road(roads: Array[Dictionary], road_id: String) -> Dictionary:
 		if road["id"] == road_id:
 			return road
 	return {}
+
+
+# ---------------------------------------------------------------------------
+# Every map in the project, against MapValidator
+#
+# The checks above are about the fictional neighbourhood specifically, and were
+# written when it was the only map. These run the shared rules over EVERY map
+# resource in res://resources, discovered rather than listed, so a map added
+# later is checked the day it is added and not the day someone remembers to add
+# it here. tools/validate_map.gd runs the same rules from the command line with
+# a fuller report; this is the version that fails the build.
+# ---------------------------------------------------------------------------
+
+const RESOURCE_DIR: String = "res://resources"
+
+## Handoff §7 asks for at least three hydrants including one near the station,
+## and at least three incident buildings, of every playable map. "Near" cannot
+## be a fixed distance across maps at different scales, so it is expressed as a
+## fraction of the map's own diagonal: on the fictional map that is about 340
+## units and on the Windsor import about 2600.
+const STATION_HYDRANT_DIAGONAL_FRACTION: float = 0.2
+
+
+func test_every_map_resource_passes_every_validator_rule() -> void:
+	var paths: Array[String] = _discover_map_resources()
+	assert_true(paths.size() >= 2, "the project has at least the two maps this milestone shipped (found %d)" % paths.size())
+
+	for path in paths:
+		var map: MapDefinition = load(path) as MapDefinition
+		assert_true(map != null, "%s loads as a MapDefinition" % path)
+		if map == null:
+			continue
+		for result in MapValidator.validate(map):
+			assert_true(
+				bool(result["passed"]),
+				"%s: %s (%s)" % [path.get_file(), result["rule"], result["detail"]]
+			)
+
+
+func test_every_map_resource_meets_the_handoff_minimums() -> void:
+	for path in _discover_map_resources():
+		var map: MapDefinition = load(path) as MapDefinition
+		if map == null:
+			continue
+
+		assert_true(
+			map.schema_version == MapDefinition.SCHEMA_VERSION,
+			"%s is at schema version %d, the current schema is %d" % [
+				path.get_file(), map.schema_version, MapDefinition.SCHEMA_VERSION
+			]
+		)
+		assert_true(
+			map.hydrants.size() >= MIN_HYDRANTS,
+			"%s has at least %d hydrants (found %d)" % [path.get_file(), MIN_HYDRANTS, map.hydrants.size()]
+		)
+		assert_true(
+			map.incident_candidates.size() >= MIN_INCIDENT_CANDIDATES,
+			"%s has at least %d incident candidates (found %d)" % [
+				path.get_file(), MIN_INCIDENT_CANDIDATES, map.incident_candidates.size()
+			]
+		)
+
+		var allowed: float = map.world_bounds.size.length() * STATION_HYDRANT_DIAGONAL_FRACTION
+		var closest: float = INF
+		for hydrant in map.hydrants:
+			closest = minf(closest, map.station_spawn_position.distance_to(hydrant["position"]))
+		assert_true(
+			closest <= allowed,
+			"%s has a hydrant near the station (closest %.0f units, allowed %.0f)" % [
+				path.get_file(), closest, allowed
+			]
+		)
+
+
+func _discover_map_resources() -> Array[String]:
+	var found: Array[String] = []
+	var directory: DirAccess = DirAccess.open(RESOURCE_DIR)
+	if directory == null:
+		return found
+	directory.list_dir_begin()
+	var entry: String = directory.get_next()
+	while entry != "":
+		if not directory.current_is_dir() and entry.ends_with(".tres"):
+			found.append("%s/%s" % [RESOURCE_DIR, entry])
+		entry = directory.get_next()
+	directory.list_dir_end()
+	found.sort()
+	return found
