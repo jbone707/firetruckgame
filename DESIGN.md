@@ -54,6 +54,17 @@ stream immediately; a hydrant takes a second to hook up and then fills at 50
 units a second, so a full tank is about three seconds from the moment the
 hookup begins.
 
+Pulling up to a hydrant is meant to be easy. Its reach is drawn on the ground
+as a ring, dashed while you are still too far away and solid the moment you are
+close enough, so you can see whether you have parked well enough before you
+touch anything. Reach is measured from the hydrant to the nearest part of the
+engine's body rather than to its centre, so nose in, alongside and at a sloppy
+angle all work, and stopping a truck length short or overshooting by two still
+works. Rolling to a halt counts as stopped. What is still asked of you is to
+pull over to the hydrant's own side of the street. Holding E is what starts the
+hookup; nothing connects on its own, and while it is connected a hose runs from
+the hydrant to the side of the engine.
+
 You can see the stream working. While it is actually taking health off a fire
 the impact turns into a dense white steam burst, the flames go out one at a
 time as the fire's health falls, a health bar with its percentage sits over
@@ -82,14 +93,16 @@ units/second). At the camera's zoom a road spans about a fifth of the screen
 and the player sees roughly a third of the map's width at a time, so a street
 reads as a street rather than as a line drawn on a field.
 
-The land between the roads is filled and solid. Each block is a concrete
-sidewalk band around a garden, with houses on lots facing the streets, and
-all of it stops the truck: the only drivable surface on the map is road.
-Blocks tile the whole neighbourhood, verges at the boundary included, so
-there is no open ground anywhere to cut a corner across. Their collision sits
-on its own physics layer, which the truck collides with and the water stream
-passes through, because a stream clears a fence and a front lawn and does not
-clear a house.
+The land between the roads is a concrete sidewalk band around a garden, with
+houses on lots facing the streets. The sidewalk is drivable: you can mount the
+kerb to get round something, or to pull level with a hydrant, and in this build
+it costs nothing at all, no speed penalty and no damage. The gardens behind
+their fences are not drivable, and neither are the houses on them, so the
+fence, not the kerb, is the line the engine cannot cross. Blocks tile the whole
+neighbourhood, verges at the boundary included, so there is no unclaimed ground
+anywhere. The gardens' collision sits on its own physics layer, which the truck
+collides with and the water stream passes through, because a stream clears a
+fence and a front lawn and does not clear a house.
 
 The map's layout is stored as data (`MapDefinition`, saved as
 `resources/neighbourhood.tres`) separately from the code that draws and
@@ -130,6 +143,14 @@ exist yet:
   not a stand-in for, or an approximation of, any real location.
 - **Traffic and signals.** Moving traffic, working traffic signals, and later
   upgrades that improve how traffic yields to the engine.
+- **Pedestrians.** People walking the neighbourhood, on the sidewalks and
+  across the streets. None exist in this build; nothing walks anywhere. The
+  reason it matters to write down now is that it changes a rule that is
+  currently free: driving on the sidewalk costs nothing today precisely
+  because there is nobody on it. Once there is, mounting the kerb has to have
+  a consequence, and the free ride ends. That is deliberate sequencing, not an
+  oversight, and this note exists so the next person to read the sidewalk rule
+  knows it is temporary.
 - **iPhone and touch.** Native iPhone support and on-screen touch controls
   are planned but have not been built, and iPhone compatibility has not been
   tested on any device. Nothing in this build should be taken as a claim that

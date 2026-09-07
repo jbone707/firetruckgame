@@ -44,9 +44,13 @@ yourself. All of that is already in the project files.
   flames start going out, and the HUD says "Knocking it down". Plain water and no
   line means you are missing.
 - A wall between the nozzle and the fire blocks the stream.
-- Roads are the only place you can drive. Sidewalks, gardens and lots all stop
-  the engine, so getting there means taking the streets.
-- Refilling takes about three seconds from the moment the hookup starts.
+- Roads and sidewalks are where you can drive. Mounting the kerb is allowed and
+  costs nothing. Garden fences and houses are not: the fence line, not the kerb,
+  is where the engine stops.
+- Refilling takes about three seconds from the moment the hookup starts. Every
+  hydrant draws its reach on the ground, dashed when you are too far away and
+  solid once you are close enough to hold E. Nose in, alongside or at an angle
+  all work; you just have to be on the hydrant's side of the street.
 - When the call is off screen an arrow at the edge of the screen points to it.
   When it is on screen the arrow goes and a marker hangs over the building.
 - Crashing hurts, and a flat-out crash hurts a lot. The engine going out of
