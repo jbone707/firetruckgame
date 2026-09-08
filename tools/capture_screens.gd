@@ -48,6 +48,18 @@ const NARROW_SIZE: Vector2i = Vector2i(960, 540)
 ## MORE world; above 1.0 shows less, i.e. is closer in).
 const CLOSEUP_ZOOM: float = 2.2
 
+## Wider zooms for the shots whose subject is a piece of the map rather than the
+## engine. CLOSEUP_ZOOM is framed for the truck, and at 2.2 the view is only
+## about 580 world units across, which is narrower than a junction, a barricade
+## and the road it closes, or a street name: the first run of this tool put all
+## three either at the frame's edge or outside it. Each of these is the widest
+## zoom that still fills the frame with its own subject.
+const JUNCTION_ZOOM: float = 1.0
+const EDGE_ZOOM: float = 1.1
+const SIGN_ZOOM: float = 2.4
+const HYDRANT_ZOOM: float = 1.8
+const LABEL_ZOOM: float = 1.15
+
 var main: Node
 var truck: TruckController
 var water: WaterSystem
@@ -330,30 +342,49 @@ func _find_edge_terminus() -> Dictionary:
 ## almost on top of the sign 72 units further along the same line, and no
 ## truck position back on the road leaves enough clearance at a close zoom
 ## without also pushing the sign out of frame.
+## 26 and 27 are the same shot on the two shipped maps: a place where two roads
+## branch, with the junction fill MapGeometry builds visible as the thing that
+## makes it read as a junction rather than as two overlapping strips.
+##
+## Framed on the junction, with the truck parked back from it so both are in
+## shot. Following the truck instead put the junction 220 units ahead of a view
+## only ~580 units across at CLOSEUP_ZOOM, and the camera's own look-ahead
+## carried what was left of it off the edge: 26 came back as a truck on a plain
+## stretch of road with no junction in the frame at all, and 27, whose Elm Grove
+## junction is a perimeter corner, came back framed so tightly on the barricade
+## standing there that it was indistinguishable from 28.
+func _junction_shot(junction: Dictionary, shot_name: String) -> void:
+	var junction_heading: float = junction["heading"]
+	var junction_point: Vector2 = junction["point"]
+	var back: Vector2 = Vector2.RIGHT.rotated(junction_heading)
+	await _place_truck(junction_point - back * 240.0, junction_heading)
+	await _frame_point(junction_point - back * 90.0, JUNCTION_ZOOM)
+	await _shot(shot_name)
+	await _follow_truck_again(CLOSEUP_ZOOM)
+
+
 func _terminus_shots(terminus: Dictionary) -> void:
 	var point: Vector2 = terminus["point"]
 	var outward: Vector2 = terminus["outward"]
 	var sign_center: Vector2 = terminus["sign_center"]
 	var heading: float = outward.angle()
 
-	await _place_truck(point - outward * 220.0, heading)
+	# 28 is about the bar spanning the road, so it frames the barricade with the
+	# truck approaching it and sits back far enough for the whole bar, the road
+	# it closes and the sign beyond it to fit. At CLOSEUP_ZOOM the first run put
+	# the eye so close that the stripes read as a red and white wall filling one
+	# side of the frame, with no road visible for them to be blocking.
+	await _place_truck(point - outward * 260.0, heading)
+	await _frame_point(point - outward * 130.0, EDGE_ZOOM)
 	await _shot("28_map_edge_barricade")
 
-	# The sign itself stands in the verge, past the world bounds FollowCamera's
-	# own limit_* is clamped to (apply_world_bounds only ever sees the
-	# playable extent), so centering on it at this zoom needs the limit off
-	# for this one shot or the engine clamps the view back toward the road
-	# and the sign sits at the frame's edge instead of in the middle of it.
-	camera.target = null
-	camera.limit_enabled = false
-	camera.set_zoom_level(CLOSEUP_ZOOM * 1.3)
-	camera.global_position = sign_center
-	for i in range(3):
-		await physics_frame
+	# 36 is the sign on its own. It stands in the verge, past the world bounds
+	# FollowCamera's own limit_* is clamped to (apply_world_bounds only ever
+	# sees the playable extent), so centring on it needs that limit off, which
+	# is what _frame_point does in the one order that actually holds.
+	await _frame_point(sign_center, SIGN_ZOOM)
 	await _shot("36_dead_end_sign")
-	camera.target = truck
-	camera.limit_enabled = true
-	camera.set_zoom_level(CLOSEUP_ZOOM)
+	await _follow_truck_again(CLOSEUP_ZOOM)
 
 
 ## Teleports the truck (a sanctioned pattern here: TruckController.return_to_station
@@ -368,6 +399,36 @@ func _place_truck(position: Vector2, heading: float) -> void:
 	water.set_spray_requested(false)
 	water.cancel_refill()
 	camera.target = truck
+	for i in range(3):
+		await physics_frame
+
+
+## Centres the view on a world point instead of on the truck, for the shots
+## whose subject is a piece of the map rather than the engine.
+##
+## The order of the three lines matters and is the whole reason this is a
+## function. FollowCamera.set_zoom_level() calls _apply_limits(), which sets
+## limit_enabled back to true, so clearing the limit BEFORE choosing the zoom
+## leaves the engine still clamping the view to the playable extent. That is
+## what put the dead end sign against the left edge of 36 on the first run,
+## half out of frame, despite that shot explicitly asking for the limit off:
+## the sign stands in the verge, outside the bounds the limit is built from.
+## The limit therefore goes off last, after the zoom that would restore it.
+func _frame_point(point: Vector2, zoom_level: float) -> void:
+	camera.target = null
+	camera.set_zoom_level(zoom_level)
+	camera.limit_enabled = false
+	camera.global_position = point
+	camera.reset_smoothing()
+	for i in range(3):
+		await physics_frame
+
+
+## Hands the view back to the truck after a _frame_point shot, limit and all.
+func _follow_truck_again(zoom_level: float) -> void:
+	camera.target = truck
+	camera.set_zoom_level(zoom_level)
+	camera.limit_enabled = true
 	for i in range(3):
 		await physics_frame
 
@@ -429,26 +490,55 @@ func _group_hud_states() -> void:
 		var forward: Vector2 = Vector2.RIGHT.rotated(heading)
 		var radius: float = hydrant.get_interaction_radius()
 
-		# 08: in range, but moving too fast to hook up.
+		# 08: in range, but moving too fast to hook up. The tank has to be
+		# holding something for this line to be reachable at all. Main's
+		# _compose_prompt puts "Out of water" above every hydrant prompt, so on
+		# the tank 06 just drained, "Slow down to hook up" can never be the line
+		# on screen: the first run of this tool captured the out-of-water
+		# sentence here instead, with the hydrant ring lit around the truck.
+		#
+		# The speed only has to hold until _refresh_hud reads it. Main's own
+		# _physics_process is off, so the prompt _update_hydrants picks is
+		# latched into the UI and stays there while _shot waits for the frame
+		# to draw and TruckController brakes the (undriven) truck back to rest.
+		water.fill_tank()
+		water.consume_water(water.tank_capacity * 0.5)
 		await _place_truck(hydrant.global_position + forward * (radius * 0.4), heading)
 		truck.velocity = forward * 150.0
 		Input.action_press("hydrant_hookup")
 		await _refresh_hud()
 		await _shot("08_hud_hydrant_too_fast")
 
-		# Stationary and holding E from here on: the real hookup -> refill ->
-		# full sequence, driven by WaterSystem's own _physics_process, which
-		# runs every physics frame regardless of Main's being disabled.
+		# Stationary, drained again, and holding E from here on: the real
+		# hookup -> refill -> full sequence, driven by WaterSystem's own
+		# _physics_process, which runs every physics frame regardless of Main's
+		# being disabled.
 		truck.velocity = Vector2.ZERO
-		await _refresh_hud()
+		water.consume_water(water.tank_capacity)
+
+		# Half way through the 1.0s (60 physics frame) hookup rather than at its
+		# first frame, so the percentage in the line is showing a hookup in
+		# progress rather than one that has not started.
+		for i in range(30):
+			await physics_frame
+			await _refresh_hud()
 		await _shot("09_hud_hooking_up")
 
-		# hydrant_hookup_time is 1.0s (60 physics frames); run comfortably past
-		# it into REFILLING and capture partway through the fill.
-		# hydrant_refill_rate is 50 units/s against a drained 100-unit tank, so
-		# stopping at 90 frames (1.5s, ~0.5s of which is actual refilling)
-		# leaves the tank clearly partial rather than freshly started or full.
-		for i in range(90):
+		# 30 frames in already, so another 60 lands 30 frames (0.5s) past the
+		# end of the 1.0s hookup. hydrant_refill_rate is 50 units/s against a
+		# drained 100-unit tank, which leaves the bar clearly partial rather
+		# than freshly started or full.
+		#
+		# The prompt in this shot reads "Hooking up, 0%", not "Refilling", and
+		# that is what the game does rather than a mistimed capture. WaterSystem
+		# .get_hookup_progress() returns 0.0 in any state but HOOKING_UP, so
+		# once the fill actually starts, Hydrant.evaluate's
+		# "currently_refilling and hookup_progress >= 1.0" test can never be
+		# true and it falls through to HOOKING_UP with a progress of zero.
+		# Prompt.REFILLING's "Refilling" is unreachable. Left as it really
+		# renders: a screenshot pack that quietly staged the line the code
+		# cannot produce would hide the bug rather than show it.
+		for i in range(60):
 			await physics_frame
 			await _refresh_hud()
 		await _shot("10_hud_refilling")
@@ -609,10 +699,18 @@ func _group_world_closeups() -> void:
 		var forward: Vector2 = Vector2.RIGHT.rotated(heading)
 		var radius: float = hydrant.get_interaction_radius()
 
-		await _place_truck(hydrant.global_position + forward * (radius + 70.0), heading)
+		# Framed on the gap between the two, not on the truck: the subject is a
+		# hydrant sitting outside the range ring, and following the truck at
+		# CLOSEUP_ZOOM pushed the hydrant clean out of the frame on the first
+		# run, leaving a shot of empty asphalt with nothing to be out of range
+		# of. 22 needs no such help; its truck is parked almost on the hydrant.
+		var out_of_range_at: Vector2 = hydrant.global_position + forward * (radius + 70.0)
+		await _place_truck(out_of_range_at, heading)
 		Input.action_release("hydrant_hookup")
 		await _refresh_hud()
+		await _frame_point((out_of_range_at + hydrant.global_position) / 2.0, HYDRANT_ZOOM)
 		await _shot("21_hydrant_out_of_range")
+		await _follow_truck_again(CLOSEUP_ZOOM)
 
 		await _place_truck(hydrant.global_position + forward * (radius * 0.4), heading)
 		Input.action_press("hydrant_hookup")
@@ -662,10 +760,7 @@ func _group_world_closeups() -> void:
 	if windsor_junction.is_empty():
 		_skip("26_junction_windsor", "no two roads meet on this map")
 	else:
-		var junction_heading: float = windsor_junction["heading"]
-		var junction_point: Vector2 = windsor_junction["point"]
-		await _place_truck(junction_point - Vector2.RIGHT.rotated(junction_heading) * 220.0, junction_heading)
-		await _shot("26_junction_windsor")
+		await _junction_shot(windsor_junction, "26_junction_windsor")
 
 	var windsor_edge: Dictionary = _find_edge_terminus()
 	if windsor_edge.is_empty():
