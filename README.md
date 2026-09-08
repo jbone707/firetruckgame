@@ -50,6 +50,8 @@ yourself. All of that is already in the project files.
 - **Left Mouse Button**: spray water at wherever the cursor is
 - **E**, held: hook up to a hydrant and refill. You have to be close to it and
   nearly stopped. Driving off, or letting go of E, cancels it
+- **Z**: zoom the camera out or in, through three levels. The level you pick is
+  kept for the rest of the session
 - **Escape**: pause
 - **R**: return to station. A development aid only. It moves the engine back and
   stops it, and does nothing else: it does not refill the tank, repair the

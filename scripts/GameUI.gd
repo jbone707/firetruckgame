@@ -24,6 +24,15 @@ const PANEL_WIDTH: float = 460.0
 const BAR_SIZE: Vector2 = Vector2(190.0, 18.0)
 const EDGE_MARGIN: float = 18.0
 
+## Backing behind the top-right HUD column, so a street name painted on the
+## asphalt can never tangle with the numbers drawn over it. Dark and mostly
+## opaque: the HUD has to win against whatever the map puts behind it.
+const HUD_BACKING_COLOR: Color = Color(0.05, 0.07, 0.10, 0.72)
+
+## Clear space between the rows of that column, world pixels. Four was too tight
+## for the urgent line to breathe in even before it grew.
+const HUD_ROW_SEPARATION: int = 8
+
 ## Seconds of margin below which the countdown starts shouting.
 const URGENT_SECONDS: float = 30.0
 
@@ -144,13 +153,33 @@ func _build_hud() -> void:
 	left.add_child(water_row)
 
 	# Top right: the call, the margin left on it, and the bank.
+	#
+	# On its own backing, and with a real gap between the rows (Milestone 8
+	# Part 3). Both come from James reading "Time left 0:04, running out" over a
+	# street label: HUD text with nothing behind it is drawn straight onto the
+	# map, and a pale street name painted on the asphalt is exactly the kind of
+	# thing it lands on. The rows never actually intersected each other, which
+	# the physics runner now asserts, but at four seconds the old rule grew the
+	# line into a 4 pixel gap and left it touching the line below.
+	var right_backing := PanelContainer.new()
+	right_backing.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	right_backing.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	right_backing.position = Vector2(-EDGE_MARGIN, EDGE_MARGIN)
+	right_backing.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var backing_style := StyleBoxFlat.new()
+	backing_style.bg_color = HUD_BACKING_COLOR
+	backing_style.set_corner_radius_all(6)
+	for side in ["left", "right"]:
+		backing_style.set("content_margin_%s" % side, 12.0)
+	for side in ["top", "bottom"]:
+		backing_style.set("content_margin_%s" % side, 8.0)
+	right_backing.add_theme_stylebox_override("panel", backing_style)
+	_hud.add_child(right_backing)
+
 	var right := VBoxContainer.new()
-	right.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	right.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	right.position = Vector2(-EDGE_MARGIN, EDGE_MARGIN)
 	right.alignment = BoxContainer.ALIGNMENT_END
-	right.add_theme_constant_override("separation", 4)
-	_hud.add_child(right)
+	right.add_theme_constant_override("separation", HUD_ROW_SEPARATION)
+	right_backing.add_child(right)
 
 	_call_label = _make_label("Call 1 of 3", 18)
 	_call_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -584,11 +613,32 @@ func set_margin_seconds(seconds: float) -> void:
 	_set_margin_urgent(urgent)
 
 
+## Urgency is carried by the WORDING and the WEIGHT, and never by the size
+## (Milestone 8 Part 3).
+##
+## It used to grow the line from 15 to 20, which made the row taller than the
+## space the top-right column had laid out for it: at four seconds left, "Time
+## left 0:04, running out" overlapped the credits line under it and read across
+## a street label behind it. A HUD element that becomes unreadable exactly when
+## it matters most is worse than one that never shouted.
+##
+## Emboldening changes nothing about the layout, because a FontVariation of the
+## same size occupies the same row height, so the panel is laid out identically
+## in both states and the two cannot collide. The words are still the carrier:
+## the line says "running out" and a player who never notices the weight has
+## already been told in English (handoff section 6, colour and styling are never
+## the only carrier of state).
 func _set_margin_urgent(urgent: bool) -> void:
 	if _margin_urgent == urgent:
 		return
 	_margin_urgent = urgent
-	_margin_label.add_theme_font_size_override("font_size", 20 if urgent else 15)
+	if not urgent:
+		_margin_label.remove_theme_font_override("font")
+		return
+	var bold := FontVariation.new()
+	bold.base_font = _margin_label.get_theme_font("font")
+	bold.variation_embolden = 0.6
+	_margin_label.add_theme_font_override("font", bold)
 
 
 func set_credits(credits: int) -> void:

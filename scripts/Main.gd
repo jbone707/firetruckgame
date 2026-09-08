@@ -27,11 +27,11 @@ var _hydrants: Array[Hydrant] = []
 var _save: SaveManager = null
 var _shop_status: String = ""
 
-## DEVELOPMENT ONLY, Milestone 6 Part 3: the transient line the zoom key
-## writes, and how long it stays up. Goes with the Z key block below.
-const DEV_MESSAGE_SECONDS: float = 1.0
-var _dev_message: String = ""
-var _dev_message_remaining: float = 0.0
+## The transient line the zoom key writes, and how long it stays up.
+## Shown for a second so pressing Z is answered rather than merely obeyed.
+const TRANSIENT_MESSAGE_SECONDS: float = 1.0
+var _transient_message: String = ""
+var _transient_message_remaining: float = 0.0
 var _zoom_index: int = 0
 
 
@@ -110,6 +110,10 @@ func load_map(path: String) -> void:
 	_truck.velocity = Vector2.ZERO
 
 	_camera.apply_world_bounds(_map_builder.get_world_bounds())
+	# The zoom the player chose survives a change of map: a view setting that
+	# reset itself every time a shift started would have to be set again every
+	# time. apply_world_bounds has just recomputed the limits, which depend on it.
+	_camera.set_zoom_level(_zoom_levels()[_zoom_index])
 	_camera.snap_to_target()
 
 	_dispatch.setup(
@@ -247,33 +251,28 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	# ---------------------------------------------------------------------
-	# DEVELOPMENT KEY, Milestone 6 Part 3. Cycles the camera through
-	# GameBalance.camera_zoom_levels so James can pick the one that feels like
-	# the area he selected, by looking rather than by arithmetic. The next
-	# milestone pins his choice as the only level and deletes this block, the
-	# _dev_message pair below, and the branch in _compose_prompt.
-	#
-	# Read as a raw key rather than through an input action on purpose: it is
-	# not part of the game's controls, it is not in project.godot's input map,
-	# and removing it should be deleting code and nothing else.
-	# ---------------------------------------------------------------------
-	if event is InputEventKey and event.pressed and not event.echo:
-		var key: InputEventKey = event
-		if key.physical_keycode == KEY_Z:
-			_cycle_camera_zoom()
-			get_viewport().set_input_as_handled()
+	if event.is_action_pressed("cycle_zoom"):
+		_cycle_camera_zoom()
+		get_viewport().set_input_as_handled()
 
 
-## DEVELOPMENT ONLY. See the Z key block above.
+## Z, a real control since Milestone 8 Part 3.
+##
+## It arrived in Milestone 6 as a development key so James could choose one zoom
+## level by looking rather than have a number guessed for him. He played all
+## three and wanted to keep all three, so it is a control now: in the input map,
+## in the pause menu and in README.md, with a HUD line that names the level it
+## just moved to. The level is kept for the rest of the session, across shifts
+## and across a change of map, because a view setting that reset itself every
+## time a shift started would have to be set again every time.
 func _cycle_camera_zoom() -> void:
-	var levels: Array[float] = _session.balance.camera_zoom_levels
+	var levels: Array[float] = _zoom_levels()
 	if levels.is_empty():
 		return
 	_zoom_index = (_zoom_index + 1) % levels.size()
 	_camera.set_zoom_level(levels[_zoom_index])
-	_dev_message = "Zoom %s" % String.num(levels[_zoom_index], 2)
-	_dev_message_remaining = DEV_MESSAGE_SECONDS
+	_transient_message = "Zoom %s" % String.num(levels[_zoom_index], 2)
+	_transient_message_remaining = TRANSIENT_MESSAGE_SECONDS
 
 
 func _physics_process(delta: float) -> void:
@@ -284,9 +283,9 @@ func _physics_process(delta: float) -> void:
 	if get_tree().paused or _session.state != GameSession.State.PLAYING:
 		return
 
-	# DEVELOPMENT ONLY, goes with the zoom key.
-	if _dev_message_remaining > 0.0:
-		_dev_message_remaining = maxf(_dev_message_remaining - delta, 0.0)
+	# The zoom line ages out on its own.
+	if _transient_message_remaining > 0.0:
+		_transient_message_remaining = maxf(_transient_message_remaining - delta, 0.0)
 
 	var throttle: float = (
 		Input.get_action_strength("drive_throttle") - Input.get_action_strength("drive_brake")
@@ -355,11 +354,11 @@ func _update_hydrants() -> void:
 ## One prompt line, chosen by priority. An empty tank is the most urgent thing
 ## the player can be told, so it wins over a hydrant prompt.
 func _compose_prompt(hydrant_prompt: int) -> String:
-	# DEVELOPMENT ONLY, removed with the zoom key it belongs to. It sits above
-	# everything because it is an answer to something James just pressed, and a
-	# reply to a keypress that a hydrant prompt can swallow is not a reply.
-	if _dev_message_remaining > 0.0:
-		return _dev_message
+	# The zoom line sits above everything because it is an answer to something
+	# the player just pressed, and a reply to a keypress that a hydrant prompt
+	# can swallow is not a reply.
+	if _transient_message_remaining > 0.0:
+		return _transient_message
 	if _water.is_empty() and _water.refill_state == WaterSystem.RefillState.IDLE:
 		return "Out of water. Find a hydrant and hold E to refill"
 	var text: String = Hydrant.prompt_text(hydrant_prompt, _water.get_hookup_progress())
@@ -522,3 +521,16 @@ func _on_return_to_station_requested() -> void:
 	_water.cancel_refill()
 	_camera.snap_to_target()
 	_set_paused(false)
+
+
+## The camera zoom levels, resolved without going through GameSession.
+##
+## load_map runs from _ready BEFORE _session.setup, so _session.balance does not
+## exist yet the first time the zoom has to be applied. Reading the autoload
+## directly is the only ordering that works for both callers, and the fallback
+## keeps a headless test that never registered the autoload out of a crash.
+func _zoom_levels() -> Array[float]:
+	var balance: Node = get_node_or_null("/root/GameBalance")
+	if balance == null or balance.camera_zoom_levels.is_empty():
+		return [FollowCamera.ZOOM] as Array[float]
+	return balance.camera_zoom_levels

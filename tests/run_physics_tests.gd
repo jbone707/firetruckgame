@@ -14,6 +14,12 @@ extends SceneTree
 ##
 ## Exits 0 only when every check passes, like the other runner.
 
+## The clear space the HUD rows must keep between them, world pixels. A
+## LITERAL, deliberately not GameUI.HUD_ROW_SEPARATION: a check that reads the
+## constant it is policing passes by construction whatever that constant
+## becomes, which is exactly what the first version of this did.
+const HUD_MIN_ROW_GAP: float = 6.0
+
 const PHYSICS_FPS: int = 60
 
 ## The imported map. Several checks run twice, once on each map, because the
@@ -80,6 +86,8 @@ func _run() -> void:
 	await _check_the_menus_walk_the_way_a_player_walks_them()
 	await _check_every_approach_to_a_hydrant_hooks_up()
 	await _check_the_narrowest_road_the_truck_can_turn_in()
+	await _check_the_hud_rows_never_overlap()
+	await _check_the_zoom_control_holds_its_level()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -1334,6 +1342,132 @@ func _check_the_menus_walk_the_way_a_player_walks_them() -> void:
 	_check(
 		session.state == GameSession.State.PLAYING,
 		"and leaves the shift running"
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## The HUD's top-right column never overlaps itself, at either resolution, in
+## either state of the escalation line (Milestone 8 Part 3).
+##
+## Under thirty seconds the line used to grow from 15 point to 20, which made it
+## taller than the row laid out for it: at four seconds left, "Time left 0:04,
+## running out" sat over the credits line under it. The urgency is carried by
+## the wording and by weight now, and weight does not change a row's height, so
+## the panel lays out identically in both states. This asks the rendered
+## rectangles rather than trusting that.
+##
+## Both resolutions because the column is anchored to the top right corner and
+## the failure was a height, not a width: 960x540 is the smallest window this
+## project has ever been run at and is where a row has least room.
+func _check_the_hud_rows_never_overlap() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var ui: GameUI = main.get_node("GameUI")
+
+	main._session.start_shift()
+	await physics_frame
+
+	for size in [Vector2i(1280, 720), Vector2i(960, 540)]:
+		get_root().content_scale_size = size
+		# Both states, driven through the real setter rather than by poking the
+		# label, so the check exercises the rule and not a copy of it.
+		for seconds in [90.0, 4.0]:
+			ui.set_margin_seconds(seconds)
+			ui.set_call(1, 3)
+			ui.set_credits(1250)
+			ui.set_siren(true)
+			await physics_frame
+			await physics_frame
+
+			var rows: Array[Control] = [
+				ui._call_label, ui._margin_label, ui._credits_label, ui._siren_label,
+			]
+			var overlaps: Array[String] = []
+			for i in range(rows.size()):
+				for j in range(i + 1, rows.size()):
+					var a: Rect2 = rows[i].get_global_rect()
+					var b: Rect2 = rows[j].get_global_rect()
+					if a.grow(HUD_MIN_ROW_GAP / 2.0).intersects(b):
+						overlaps.append("%s over %s" % [rows[i].name, rows[j].name])
+			_check(
+				overlaps.is_empty(),
+				"HUD rows keep their clear gap at %dx%d with %.0f s left (%s)" % [
+					size.x, size.y, seconds, overlaps
+				]
+			)
+			# And the whole column stays on screen.
+			var lowest: float = 0.0
+			for row in rows:
+				lowest = maxf(lowest, row.get_global_rect().end.y)
+			_check(
+				lowest <= float(size.y),
+				"the column ends %.0f above the bottom of a %d high window" % [
+					float(size.y) - lowest, size.y
+				]
+			)
+
+	get_root().content_scale_size = Vector2i(1280, 720)
+	main.queue_free()
+	await physics_frame
+
+
+## Z cycles the three zoom levels, the camera limits follow it, and the level
+## the player picked survives a change of map (Milestone 8 Part 3).
+func _check_the_zoom_control_holds_its_level() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var camera: FollowCamera = main.get_node("Camera")
+	var levels: Array = main._zoom_levels()
+
+	_check(levels.size() == 3, "there are three zoom levels (%d)" % levels.size())
+	_check(
+		is_equal_approx(camera.get_zoom_level(), float(levels[0])),
+		"a shift opens at the first level (%.2f)" % camera.get_zoom_level()
+	)
+
+	# Round the whole cycle and back, checking the two things that are measured
+	# against the screen rather than against the world follow it.
+	for step in range(levels.size()):
+		var expected: float = float(levels[(step + 1) % levels.size()])
+		main._cycle_camera_zoom()
+		await physics_frame
+		_check(
+			is_equal_approx(camera.get_zoom_level(), expected),
+			"Z moves the zoom to %.2f (got %.2f)" % [expected, camera.get_zoom_level()]
+		)
+		_check(
+			camera.get_look_ahead_distance() > 0.0
+				and is_equal_approx(
+					camera.get_look_ahead_distance(),
+					FollowCamera.LOOK_AHEAD_DISTANCE * (FollowCamera.ZOOM / expected)
+				),
+			"and the lead scales with it (%.0f)" % camera.get_look_ahead_distance()
+		)
+		# The overscan is half a screen at this zoom, so the limits must sit
+		# outside the world by more at a wider zoom and never inside it.
+		var bounds: Rect2 = main._map_builder.get_world_bounds()
+		_check(
+			float(camera.limit_left) < bounds.position.x
+				and float(camera.limit_right) > bounds.end.x
+				and float(camera.limit_top) < bounds.position.y
+				and float(camera.limit_bottom) > bounds.end.y,
+			"and the camera may still overscan the map at %.2f" % expected
+		)
+
+	# One more press to leave it somewhere other than the default, then change
+	# map: the choice must survive.
+	main._cycle_camera_zoom()
+	await physics_frame
+	var chosen: float = camera.get_zoom_level()
+	main.load_map(WINDSOR_MAP if main._map_definition.map_id != "windsor_shadetree_v1" else ELM_GROVE_MAP)
+	await physics_frame
+	_check(
+		is_equal_approx(camera.get_zoom_level(), chosen),
+		"the chosen zoom %.2f survives a change of map (got %.2f)" % [
+			chosen, camera.get_zoom_level()
+		]
 	)
 
 	main.queue_free()
