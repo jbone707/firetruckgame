@@ -324,10 +324,10 @@ func _run_until_prompt_changes(
 	return "(the prompt never left it)"
 
 
-## Slow approach, hose launch, refill, full tank, retract. The prompt line is
+## Slow approach, hose launch, refill, full tank. The prompt line is
 ## asserted in order, because the sequence IS the feature: there is no key to
 ## press, so the words are the only thing telling the player what is happening.
-func test_the_automatic_hookup_walks_from_approach_to_a_retracted_hose() -> void:
+func test_the_automatic_hookup_walks_from_approach_to_a_full_tank() -> void:
 	var hydrant: Hydrant = _make_hydrant()
 	var water: WaterSystem = _make_water()
 	water.balance = hydrant.balance
@@ -373,18 +373,27 @@ func test_the_automatic_hookup_walks_from_approach_to_a_retracted_hose() -> void
 			break
 	seen.append(full)
 	assert_eq(seen[5], "Tank full", "a full tank says so")
-	assert_eq(hydrant.get_state(), Hydrant.State.RETRACTING, "and the hose starts coming back in")
 	assert_almost_eq(
 		water.water_remaining, water.tank_capacity, 0.0001, "the tank really is full"
 	)
 
-	# The retract runs to the end and leaves nothing behind. It never snapped,
-	# so there is no "Hose snapped" anywhere in this sequence.
-	for _frame in range(int(balance.hydrant_hose_launch_time / FRAME_DELTA) + 4):
-		_hydrant_frame(hydrant, water, 40.0, creep)
-	assert_eq(hydrant.get_state(), Hydrant.State.IDLE, "the hose is fully back in")
-	assert_eq(hydrant.get_hose_length(), 0.0, "and gone from the screen")
-	assert_eq(water.refill_state, WaterSystem.RefillState.IDLE, "with the flow shut off")
+	# AND THE HOSE STAYS ON. It used to reel itself in here, which is what the
+	# milestone prompt asked for and is what James found missing when he played
+	# it: a fill is two seconds, a truck leaving a hydrant is barely moving for
+	# the first of them, so the retract always beat the drive and the hose never
+	# went tight. Sitting at a full tank now keeps the hose, and the only way off
+	# a hydrant is to pull it off.
+	for _frame in range(int(5.0 / FRAME_DELTA)):
+		assert_eq(
+			_hydrant_frame(hydrant, water, 40.0, creep), "Tank full",
+			"a full tank keeps saying so and keeps the hose"
+		)
+	assert_eq(hydrant.get_state(), Hydrant.State.REFILLING, "the hose is still connected")
+	assert_true(hydrant.get_hose_length() > 0.0, "and still drawn")
+	assert_eq(
+		water.refill_state, WaterSystem.RefillState.IDLE,
+		"with the flow shut off, because there is nowhere for it to go"
+	)
 
 	assert_eq(
 		"|".join(PackedStringArray([seen[0], seen[1], seen[2], seen[5]])),

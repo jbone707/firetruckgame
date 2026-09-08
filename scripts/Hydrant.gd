@@ -18,7 +18,11 @@ class_name Hydrant
 ## refill cannot drift apart from the rules that start one. Main calls
 ## evaluate() once per physics frame per hydrant and does what it is told.
 
-enum State { IDLE, LAUNCHING, REFILLING, RETRACTING }
+## Three states, not four. There was a RETRACTING that reeled the hose in when
+## the tank filled; it is gone, because a fill finishes long before a truck has
+## driven far enough to pull the hose tight, so it ran every single time and the
+## snap never happened. See _tick_refilling.
+enum State { IDLE, LAUNCHING, REFILLING }
 
 enum Prompt { NONE, TOO_FAST, HOOKING_UP, REFILLING, TANK_FULL, SNAPPED }
 
@@ -58,11 +62,10 @@ var hydrant_id: String = ""
 var _active: bool = false
 var _state: State = State.IDLE
 
-## Seconds spent in LAUNCHING or RETRACTING, which is what drives how much of
-## the hose is out.
+## Seconds spent in LAUNCHING, which is what drives how much of the hose is out.
 var _state_elapsed: float = 0.0
 
-## Counts down after a snap or a retract. See GameBalance.hydrant_rehook_delay:
+## Counts down after a snap. See GameBalance.hydrant_rehook_delay:
 ## it only counts while the truck is NOT both in range and moving.
 var _rehook_lock: float = 0.0
 
@@ -106,7 +109,7 @@ func get_state() -> State:
 	return _state
 
 
-## True while a hose is out at all, in any of its three moving states. Main uses
+## True while a hose is out at all. Main uses
 ## it to decide which hydrant's prompt wins when two are somehow both in play.
 func has_hose_out() -> bool:
 	return _state != State.IDLE
@@ -223,9 +226,6 @@ func evaluate(
 			var filling: Dictionary = _tick_refilling(distance, tank_full, truck_transform, truck_half_extents)
 			prompt = filling["prompt"]
 			should_refill = filling["should_refill"]
-		State.RETRACTING:
-			var retracting: Dictionary = _tick_retracting(delta, distance, truck_transform, truck_half_extents)
-			prompt = retracting["prompt"]
 
 	# A snap outranks whatever the state machine settled on, for as long as the
 	# message lasts: it is the answer to something that just happened to the
@@ -280,6 +280,21 @@ func _tick_launching(
 	return {"prompt": Prompt.HOOKING_UP}
 
 
+## Hooked up. A full tank stops the water and nothing else: THE HOSE STAYS ON
+## UNTIL IT IS PULLED OFF.
+##
+## It used to reel itself in when the tank filled, which is what the milestone
+## prompt asked for and is what stole the feature. A fill is two seconds, and a
+## player leaving a hydrant is barely moving for the first of them, so the tank
+## was always full and the hose always retracted before the truck had gone the
+## 200 units that make it go tight. James played it and reported exactly that:
+## "the hose doesnt go taught and snap. it does automatic refill." Measured
+## afterwards, from a nearly empty tank and flat out: full at 143 units from the
+## hydrant, which is inside the slack distance, so the retract had already
+## started every time.
+##
+## Now there is one way off a hydrant and it is the one he described: you drive,
+## it goes tight, it snaps. Which also makes the taut hose worth drawing.
 func _tick_refilling(
 	distance: float, tank_full: bool, truck_transform: Transform2D, truck_half_extents: Vector2
 ) -> Dictionary:
@@ -287,29 +302,10 @@ func _tick_refilling(
 		return {"prompt": Prompt.SNAPPED, "should_refill": false}
 	_set_hose(nearest_point_on_truck(truck_transform, truck_half_extents), 1.0)
 	if tank_full:
-		_state = State.RETRACTING
-		_state_elapsed = 0.0
 		return {"prompt": Prompt.TANK_FULL, "should_refill": false}
 	return {"prompt": Prompt.REFILLING, "should_refill": true}
 
 
-## The tank filled, so the hose comes back in the way it went out. It can still
-## be snapped: a player who tops off and floors it mid-retract has pulled on a
-## hose that is still attached, and pretending otherwise would mean the hose
-## sometimes ignores the truck.
-func _tick_retracting(
-	delta: float, distance: float, truck_transform: Transform2D, truck_half_extents: Vector2
-) -> Dictionary:
-	_state_elapsed += delta
-	if _snap_if_stretched(distance, truck_transform, truck_half_extents):
-		return {"prompt": Prompt.SNAPPED}
-	_set_hose(
-		nearest_point_on_truck(truck_transform, truck_half_extents),
-		clampf(1.0 - _state_elapsed / balance.hydrant_hose_launch_time, 0.0, 1.0)
-	)
-	if _state_elapsed >= balance.hydrant_hose_launch_time:
-		_release(false)
-	return {"prompt": Prompt.TANK_FULL}
 
 
 ## Snaps the hose if the truck has pulled past the snap distance, and reports
@@ -323,13 +319,12 @@ func _snap_if_stretched(
 	_snap_span = to_local(nearest_point_on_truck(truck_transform, truck_half_extents))
 	_snap_effect_remaining = SNAP_EFFECT_TIME
 	_snap_message_remaining = balance.hydrant_snap_message_time
-	_release(true)
+	_release()
 	return true
 
 
-## Back to idle, with the settling clock started. Called at the end of a retract
-## and at a snap; the only difference between them is what the player saw.
-func _release(_snapped: bool) -> void:
+## Back to idle, with the settling clock started. Only a snap gets here now.
+func _release() -> void:
 	_state = State.IDLE
 	_state_elapsed = 0.0
 	_rehook_lock = balance.hydrant_rehook_delay

@@ -216,6 +216,30 @@ func tick_contact_cooldown(delta: float) -> void:
 	_contact_cooldown = maxf(_contact_cooldown - delta, 0.0)
 
 
+## What an impact at this speed costs, in condition.
+##
+## Nothing at all below the threshold, then the square of how far the impact
+## sits between the threshold and top speed, times what a flat-out head-on
+## costs. Squared on James's playtest note that damage should be "more a high
+## speed thing not just a tiny tap": a linear rule charges real money in the
+## middle of the range, which is where a player spends their whole shift.
+##
+## Kept as its own function, free of node state, so the curve can be checked as
+## arithmetic rather than by crashing a truck sixty times.
+func damage_for_impact(impact_speed: float) -> float:
+	resolve_balance()
+	var over: float = impact_speed - balance.collision_damage_threshold
+	if over <= 0.0:
+		return 0.0
+	var span: float = balance.forward_max_speed - balance.collision_damage_threshold
+	if span <= 0.0:
+		return balance.collision_damage_at_top_speed
+	# Not clamped at the top: a collision faster than top speed is possible when
+	# two things arrive at once, and it should cost more, not the same.
+	var share: float = over / span
+	return share * share * balance.collision_damage_at_top_speed
+
+
 ## Applies damage for one frame's worth of contact and returns the amount dealt.
 ## Returns 0.0 when under the impact threshold or still inside the cooldown.
 func register_wall_contact(impact_speed: float) -> float:
@@ -224,9 +248,7 @@ func register_wall_contact(impact_speed: float) -> float:
 	if _contact_cooldown > 0.0:
 		return 0.0
 
-	var damage: float = (
-		(impact_speed - balance.collision_damage_threshold) * balance.collision_damage_scale
-	)
+	var damage: float = damage_for_impact(impact_speed)
 	if damage <= 0.0:
 		return 0.0
 

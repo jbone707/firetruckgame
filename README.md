@@ -75,11 +75,12 @@ yourself. All of that is already in the project files.
   at an angle all work; you just have to be on the hydrant's side of the street.
   Every hydrant draws its reach on the ground, dashed when you are too far away
   and solid once you are close enough for the hose to go out.
-- **Drive off and the hose goes with you, then goes.** It hangs slack for the
-  first stretch, then pulls straight and starts to shake, and at about 260 units
-  from the hydrant it snaps, flicks back and disappears. Refilling stops there.
-  That is how you leave in a hurry: you do not have to do anything but drive.
-  When the tank fills instead, the hose reels itself back in.
+- **Driving off is how you unhook.** The hose hangs slack for the first stretch,
+  then pulls straight and starts to shake, and at about 260 units from the
+  hydrant it snaps, flicks back and disappears. That is the only way off a
+  hydrant, and you do not have to do anything but drive. A full tank shuts the
+  water off and keeps the hose, so the engine is never quietly untethered while
+  you are deciding where to go.
 - You can spray while you are hooked up. Water comes in faster than the stream
   takes it out, so the tank still climbs.
 - When the call is off screen an arrow at the edge of the screen points to it.
@@ -91,8 +92,14 @@ yourself. All of that is already in the project files.
   tells you which way the call is; the minimap tells you where you are.
   Zoomed in, the minimap follows the engine, and if the call is off the edge of
   the panel a small orange triangle on the border points at it.
-- Crashing hurts, and a flat-out crash hurts a lot. The engine going out of
-  service ends the shift.
+- **Crashing is a speed thing.** Nudging a fence while you place the engine, or
+  scraping a kerb on the way round a corner, costs nothing at all. Damage starts
+  at about half top speed and climbs steeply from there, so a flat-out head-on
+  hurts a great deal and everything short of one hardly registers. The engine
+  going out of service ends the shift; it takes three real crashes.
+- The stream reaches about one road width, which is far enough to hit a house
+  from the middle of the street outside it. Pulling over to the near side still
+  helps, and from the far kerb of a wide road you will come up short.
 - Each call you clear banks 100 credits immediately. If the shift later fails you
   keep them. Finishing all three adds 50 more.
 - The bigger tank costs 200 credits, can be bought once, and applies from your

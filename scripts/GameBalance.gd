@@ -51,21 +51,39 @@ var high_speed_steering_factor: float = 0.45 # invented default, not from handof
 ## Impact speed (world units/second, measured into the collision normal)
 ## below which no damage is dealt at all. A gentle bump should not scratch
 ## the paint.
-var collision_damage_threshold: float = 60.0 # invented default, not from handoff
-
-## Damage dealt per world unit/second of impact speed above the threshold.
 ##
-## Measured against the real thing rather than guessed, twice. At the first
-## draft's 0.6 a single wall strike took 85 condition and one mistake was
-## effectively fatal. 0.3 was then set against an impact figure that turned out
-## to be understated, because the old measurement charged one frame of a
-## two-frame stop (see TruckController._strongest_impact_speed). With the impact
-## speed read correctly, a flat-out head-on registers the full 250 units/second
-## and 0.3 would cost 57 of the 100 starting condition, so two of them would end
-## a shift. 0.25 costs 47.5, which leaves a player who has crashed badly twice
-## with 5 condition and a shift they can still finish, and a third crash does
-## end it. That is the intended shape: punishing, survivable, not endless.
-var collision_damage_scale: float = 0.25 # invented default, not from handoff
+## RAISED FROM 60 TO 120 AFTER JAMES PLAYTESTED MILESTONE 9. In his words:
+## "when you are stopped or very slow and turning i dont think damage should
+## occur. it should be more a high speed thing not just a tiny tap." At 60, a
+## glancing scrape at an ordinary cornering speed put a real number on the
+## condition bar: 150 units/second into a wall at 30 degrees is 75 into the
+## normal, which the old rule charged 3.75 for. 120 is a little under half top
+## speed, so everything a player does while placing the engine at a fire or
+## easing round a corner is free, and only a genuine crash is a crash.
+var collision_damage_threshold: float = 120.0 # invented default, not from handoff
+
+## What a flat-out head-on costs, in condition. Everything slower costs a share
+## of it, and the share is the SQUARE of how far the impact sits between the
+## threshold and top speed.
+##
+## Squared, not linear, on James's playtest note that damage should be "more a
+## high speed thing not just a tiny tap". A linear rule spreads the cost evenly
+## across the whole range, so the middle of it, which is where a player spends
+## their time, is expensive. Squaring pushes almost all of the cost into the top
+## of the range:
+##
+##     into the normal   share of the way up   cost
+##     120 units/s       0.00                   0.0
+##     150               0.23                   2.6
+##     190               0.54                  13.9
+##     220               0.77                  28.4
+##     250 (flat out)    1.00                  48.0
+##
+## 48 keeps the shape Milestone 4 measured and James approved: a player who has
+## crashed badly twice has 4 condition and a shift they can still finish, and a
+## third one ends it. What changed is everything below a real crash, which is
+## now nearly free.
+var collision_damage_at_top_speed: float = 48.0 # invented default, not from handoff
 
 ## Minimum time, in seconds, between damage applications from the same
 ## resting contact so leaning on a wall does not deduct damage every frame.
@@ -81,8 +99,32 @@ var tank_capacity: float = 100.0
 ## Spray flow rate, water units/second. Specified by handoff §5.
 var spray_flow_rate: float = 10.0
 
-## Maximum stream range, world units. Specified by handoff §5.
-var stream_range: float = 120.0
+## Maximum stream range, world units. Handoff §5 specified 120; retuned to 280
+## here, with the measurement below.
+##
+## THIS IS THE ONE NUMBER THAT NEVER GOT RESCALED WHEN THE WORLD DID. 120 was
+## right for the original 1,400 by 1,000 map. Windsor is 7,820 by 6,140 and its
+## roads are 280 units wide, and nobody moved the stream with them. James found
+## it by playing: "there are so many areas you cant spray water at a building on
+## fire so it doesnt register."
+##
+## Measured, on both shipped maps, from the road centreline to the incident
+## candidate:
+##
+##     Windsor    6 candidates, 150 to 167 units, median 166
+##     Elm Grove  6 candidates, 130 units each
+##
+## So at 120 the stream could not reach a single fire on either map from the
+## middle of the road it faces. It was only ever reachable by pulling right over
+## onto the near kerb, 140 units off the centreline, and even then by 27 units on
+## Windsor's worst candidate. That is not a hard shot, it is a shot that mostly
+## does not exist, which is exactly what it felt like.
+##
+## 280 is one road width, which is a number this map is already made of. It
+## reaches a house comfortably from the centreline (166) and from the far lane
+## (236), and just fails from the far kerb (307), so where the engine is parked
+## still matters and pulling over is still worth doing.
+var stream_range: float = 280.0
 
 ## Fire health lost per second of direct hit. Specified by handoff §5.
 var fire_damage_per_second: float = 20.0

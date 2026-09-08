@@ -87,6 +87,8 @@ func _run() -> void:
 	await _check_every_approach_to_a_hydrant_hooks_up()
 	await _check_the_hose_hooks_up_by_itself_and_snaps_when_pulled()
 	await _check_a_truck_rocking_on_the_boundary_hooks_up_only_once()
+	await _check_a_full_tank_keeps_the_hose_until_it_is_pulled_off()
+	await _check_the_stream_reaches_a_fire_from_the_road_on_both_maps()
 	await _check_the_narrowest_road_the_truck_can_turn_in()
 	await _check_the_hud_rows_never_overlap()
 	await _check_the_zoom_control_holds_its_level()
@@ -2029,4 +2031,187 @@ func _check_the_signals_run_pause_and_reset_with_the_shift() -> void:
 	)
 
 	main.queue_free()
+	await physics_frame
+
+
+## THE CASE JAMES ACTUALLY PLAYED (Milestone 9, after the first playtest).
+##
+## He reported: "the hose doesnt go taught and snap. it does automatic refill."
+## The refill was right; the snap was unreachable. A fill is two seconds and a
+## truck leaving a hydrant is barely moving for the first of them, so the tank
+## was always full before the truck had gone the 200 units that make the hose go
+## tight, and the hose reeled itself in every single time.
+##
+## This check is his session: arrive with a low tank, WAIT for it to fill, then
+## drive off. The old build had no hose left to pull by the time the engine
+## moved. Nothing is held empty here, which is the whole point of it.
+func _check_a_full_tank_keeps_the_hose_until_it_is_pulled_off() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var truck: Node = world[1]
+	var water: Node = truck.get_node("WaterSystem")
+	var delta: float = 1.0 / float(PHYSICS_FPS)
+
+	var hydrant: Node = main._hydrants[0]
+	var half: Vector2 = truck.get_collision_half_extents()
+	var balance: Node = truck.balance
+	var target: Vector2 = hydrant.global_position
+	var heading: float = main.get_station_spawn_heading()
+	var along: Vector2 = Vector2.RIGHT.rotated(heading)
+
+	# Pull up at the hydrant with the tank nearly out, and stop.
+	water.water_remaining = 5.0
+	truck.global_position = target - along * (110.0 + half.x)
+	truck.rotation = heading
+	truck.velocity = Vector2.ZERO
+	for _frame in range(3 * PHYSICS_FPS):
+		await physics_frame
+		main._update_hydrants(delta)
+		if hydrant.get_state() == Hydrant.State.REFILLING:
+			break
+	_check(
+		hydrant.get_state() == Hydrant.State.REFILLING,
+		"pulling up with an empty tank hooks up (state %d)" % hydrant.get_state()
+	)
+
+	# Sit there while it fills, and keep sitting there. THE HOSE MUST STILL BE ON.
+	for _frame in range(5 * PHYSICS_FPS):
+		await physics_frame
+		main._update_hydrants(delta)
+	_check(
+		water.water_remaining >= water.tank_capacity - 0.001,
+		"the tank fills (%.1f of %.1f)" % [water.water_remaining, water.tank_capacity]
+	)
+	_check(
+		hydrant.has_hose_out(),
+		"and five seconds later the hose is STILL connected, which is the whole fix"
+	)
+	_check(
+		not water.is_refilling(),
+		"with the water shut off, because there is nowhere for it to go"
+	)
+
+	# Now drive away, from a full tank, which is the case that never snapped.
+	var went_taut: bool = false
+	var snapped_at: float = -1.0
+	for _frame in range(5 * PHYSICS_FPS):
+		truck.set_drive_intent(1.0, 0.0, false)
+		await physics_frame
+		main._update_hydrants(delta)
+		if hydrant.is_hose_taut():
+			went_taut = true
+		if not hydrant.has_hose_out():
+			snapped_at = hydrant.distance_to_truck(truck.global_transform, half)
+			break
+
+	_check(
+		went_taut,
+		"driving off from a full tank pulls the hose tight (past %.0f units)"
+			% balance.hydrant_hose_slack_distance
+	)
+	_check(
+		snapped_at > balance.hydrant_hose_slack_distance,
+		"and it snaps rather than reeling in (at %.1f units, slack %.0f)" % [
+			snapped_at, balance.hydrant_hose_slack_distance
+		]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## CAN THE ENGINE ACTUALLY REACH THE FIRE (Milestone 9, after the first
+## playtest).
+##
+## James: "there are so many areas you cant spray water at a building on fire so
+## it doesnt register." Measured, the stream range was 120 units while every
+## incident candidate on both maps sits 130 to 167 units from the centreline of
+## the road it faces, so from the middle of the road the stream could not reach a
+## single fire on either map. It was set for the original 1,400 by 1,000 map and
+## never rescaled when the world grew.
+##
+## This drives the real thing rather than the arithmetic: a real shift, the real
+## dispatched incident, the engine parked on the road centreline nearest it, the
+## real turret aimed at it, and the fire's own health read before and after.
+func _check_the_stream_reaches_a_fire_from_the_road_on_both_maps() -> void:
+	for map_path in [WINDSOR_MAP, ELM_GROVE_MAP]:
+		var world: Array = await _make_world(map_path)
+		var main: Node = world[0]
+		var truck: Node = world[1]
+		var water: Node = truck.get_node("WaterSystem")
+		var map_name: String = main.get_map_definition().map_id
+
+		main._on_start_shift_pressed()
+		await physics_frame
+
+		var incident: Node = main._dispatch.active_incident
+		if incident == null or not is_instance_valid(incident):
+			_check(false, "%s: a shift dispatches a call to spray at" % map_name)
+			main.queue_free()
+			await physics_frame
+			continue
+
+		# The nearest point on any road centreline to the fire, which is where a
+		# player driving up the street outside the house ends up.
+		var graph: RoadGraph = main._map_builder.get_road_graph()
+		var fire_at: Vector2 = incident.global_position
+		var stand_at: Vector2 = fire_at
+		var best: float = INF
+		for edge in graph.edges:
+			var a: Vector2 = graph.positions[int(edge["a"])]
+			var b: Vector2 = graph.positions[int(edge["b"])]
+			var point: Vector2 = Geometry2D.get_closest_point_to_segment(fire_at, a, b)
+			var distance: float = point.distance_to(fire_at)
+			if distance < best:
+				best = distance
+				stand_at = point
+		_check(
+			best > 0.0,
+			"%s: the fire is %.0f units from the middle of the road it faces" % [map_name, best]
+		)
+
+		truck.global_position = stand_at
+		truck.rotation = 0.0
+		truck.velocity = Vector2.ZERO
+		water.water_remaining = water.tank_capacity
+		await physics_frame
+
+		# THE CHECK CARRIES ITS OWN PROOF. It sprays twice from the same spot at
+		# the same fire: once with the range the game shipped with, which must
+		# do nothing, and once with the range it has now, which must work. A
+		# check that only asserted the second would pass just as happily on a
+		# stream long enough to reach across the whole map.
+		var shipped_range: float = truck.balance.stream_range
+		var health_before: float = incident.health
+
+		truck.balance.stream_range = 120.0
+		await _spray_at(water, fire_at)
+		_check(
+			is_equal_approx(incident.health, health_before),
+			"%s: at the old 120 unit range, a second of spraying from the road does"
+				% map_name
+				+ " nothing at all (%.1f, standing %.0f units off)" % [incident.health, best]
+		)
+
+		truck.balance.stream_range = shipped_range
+		await _spray_at(water, fire_at)
+		_check(
+			incident.health < health_before,
+			"%s: at %.0f it takes health off the fire from the same place"
+				% [map_name, shipped_range]
+				+ " (%.1f to %.1f)" % [health_before, incident.health]
+		)
+
+		main.queue_free()
+		await physics_frame
+
+
+## One second of the real turret aimed at a world point, trigger held.
+func _spray_at(water: Node, target: Vector2) -> void:
+	water.set_aim_world_position(target)
+	water.set_spray_requested(true)
+	for _frame in range(PHYSICS_FPS):
+		water.set_aim_world_position(target)
+		await physics_frame
+	water.set_spray_requested(false)
 	await physics_frame

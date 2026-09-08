@@ -143,3 +143,74 @@ func test_damage_scales_with_impact_speed_and_condition_floors_at_zero() -> void
 	_destroy(gentle_truck)
 	_destroy(hard_truck)
 	_destroy(doomed)
+
+
+## The damage curve, after James's playtest (Milestone 9).
+##
+## He reported that damage happened "when you are stopped or very slow and
+## turning" and asked for it to be "more a high speed thing not just a tiny
+## tap". Two changes: the threshold went 60 to 120, and the cost above it went
+## from linear to the square of how far up the range the impact sits. This
+## checks the SHAPE rather than the numbers, so retuning the numbers on purpose
+## does not fail it, but flattening the curve back out does.
+func test_damage_is_a_high_speed_thing_and_a_slow_knock_costs_nothing() -> void:
+	var truck: TruckController = _make_truck()
+	var balance: Node = truck.balance
+	var threshold: float = balance.collision_damage_threshold
+	var top: float = balance.forward_max_speed
+
+	assert_true(
+		threshold >= top * 0.4,
+		"the threshold is a real fraction of top speed, not a scratch (%.0f of %.0f)"
+			% [threshold, top]
+	)
+
+	# Everything at or under the threshold is free, including the speeds a player
+	# places the engine at.
+	for speed in [0.0, 10.0, 40.0, 80.0, threshold]:
+		assert_eq(
+			truck.damage_for_impact(speed), 0.0,
+			"arriving at %.0f units/s costs nothing" % speed
+		)
+
+	# A flat-out head-on costs what the balance says it costs.
+	assert_almost_eq(
+		truck.damage_for_impact(top), balance.collision_damage_at_top_speed, 0.0001,
+		"a flat-out head-on costs the full amount"
+	)
+
+	# And the curve is convex: the second half of the range costs far more than
+	# the first. Under the old linear rule these two halves cost the same.
+	var quarter: float = threshold + (top - threshold) * 0.25
+	var half: float = threshold + (top - threshold) * 0.5
+	var three_quarters: float = threshold + (top - threshold) * 0.75
+	var first_half: float = truck.damage_for_impact(half)
+	var second_half: float = truck.damage_for_impact(top) - first_half
+	assert_true(
+		second_half > first_half * 2.0,
+		"the top half of the range costs more than twice the bottom half (%.1f against %.1f)"
+			% [second_half, first_half]
+	)
+	assert_true(
+		truck.damage_for_impact(quarter) < balance.collision_damage_at_top_speed * 0.1,
+		"a quarter of the way up costs under a tenth of a crash (%.1f)"
+			% truck.damage_for_impact(quarter)
+	)
+	assert_true(
+		truck.damage_for_impact(three_quarters) > truck.damage_for_impact(half) * 2.0,
+		"and three quarters of the way up costs more than twice half way"
+	)
+
+	# Still monotonic, and still survivable twice: the shape Milestone 4 settled.
+	assert_true(
+		truck.damage_for_impact(top) * 2.0 < truck.max_condition,
+		"two flat-out crashes leave the engine alive (%.1f of %.0f)" % [
+			truck.damage_for_impact(top) * 2.0, truck.max_condition
+		]
+	)
+	assert_true(
+		truck.damage_for_impact(top) * 3.0 > truck.max_condition,
+		"and a third ends the shift"
+	)
+
+	_destroy(truck)
