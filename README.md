@@ -98,6 +98,12 @@ that is not committed yet:
 Add `-- res://resources/windsor_shadetree.tres` to check one map instead of all
 of them. It exits nonzero if any rule fails on any map.
 
+One more tool measures rather than checks. It prints each map's road width,
+house footprint width and junction spacing, in world units and in truck lengths,
+which is how the Windsor map's scale was chosen:
+
+    "C:UsersjamesDownloadsGodot_v4.7.2-stable_win64.exeGodot_v4.7.2-stable_win64_console.exe" --headless --path . --script res://tools/measure_scale.gd
+
 ## Rebuilding the Maps
 
 Neither of these needs to be run to play the game. Both write into the
