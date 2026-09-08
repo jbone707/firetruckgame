@@ -28,15 +28,76 @@ const OUTPUT_PATH: String = "res://resources/windsor_shadetree.tres"
 const MAP_ID: String = "windsor_shadetree_v1"
 const DISPLAY_NAME: String = "Windsor Test Area"
 
-# The bounding box, repeated from the Overpass query so the projection and the
-# download can be checked against each other. If these ever disagree with
-# data/source/windsor_shadetree_smoketree.overpassql, the projection is wrong.
+# The DOWNLOAD box, repeated verbatim from the Overpass query so the projection
+# and the download can be checked against each other. If these ever disagree
+# with data/source/windsor_shadetree_smoketree.overpassql, the projection is
+# wrong. Nothing clips to these; they are the record of what was asked for.
 const CENTRE_LAT: float = 38.5439893
 const CENTRE_LON: float = -122.7953823
-const MIN_LAT: float = 38.5422777
-const MAX_LAT: float = 38.5457009
-const MIN_LON: float = -122.7982498
-const MAX_LON: float = -122.7925148
+const QUERY_MIN_LAT: float = 38.5422777
+const QUERY_MAX_LAT: float = 38.5457009
+const QUERY_MIN_LON: float = -122.7982498
+const QUERY_MAX_LON: float = -122.7925148
+
+## How far past the download box, in metres, the playable map reaches on the
+## north and east sides (Milestone 8 Part 2).
+##
+## Overpass was asked for ways INTERSECTING the download box and answered with
+## `out geom`, which returns each matching way's COMPLETE geometry. So the JSON
+## already committed in data/source holds 226 m of road north of the box and
+## 133 m east of it, downloaded in 2026 and never used. Nothing here calls the
+## network and nothing here invents geography: this reads ground that was always
+## in the file.
+##
+## 30 m, and the reason it is 30 rather than more or less:
+##
+## - Shadetree Lane and Leafhaven Lane meet at OSM node 56129843, which is 2.5 m
+##   NORTH of the download box. The box cut their junction in half, so the two
+##   roads arrived as two dead ends 83 units apart at the top wall with the turn
+##   between them off the map. That is what James saw. 30 m puts the junction
+##   27.5 m inside, with about 385 units of each arm beyond it, comfortably more
+##   than the 280 unit road width the junction rule asks for.
+## - On the east side the Sugar Maple junctions had fills reaching up to 119
+##   units past the wall. 30 m clears them by the same margin.
+##
+## Not more, because coverage past the download box is RAGGED by construction:
+## only ways that happened to poke into the box are in the file at all, so a
+## wide extension would draw a fringe of roads with their neighbours missing.
+## 30 m is the smallest extension that fixes the junctions it has to fix.
+##
+## South and west are not extended. Nothing there is cut in half; the roads that
+## reach those walls simply end there, and end there in life too as far as this
+## extract can say. They get a terminus instead.
+const CLIP_MARGIN_NORTH_METRES: float = 30.0
+const CLIP_MARGIN_EAST_METRES: float = 30.0
+const CLIP_MARGIN_SOUTH_METRES: float = 0.0
+const CLIP_MARGIN_WEST_METRES: float = 0.0
+
+## Verge between the geographic box the roads are clipped to and the boundary
+## wall, world units (Milestone 8 Part 2).
+##
+## Twenty-two of Windsor's road slabs used to run under the wall and out of the
+## world, because a centreline clipped exactly to the boundary still carries a
+## slab half a road width to either side of it. Asphalt drawn past the thing
+## that stops the truck.
+##
+## Two ways to fix that. Pulling each centreline in by half its own width was
+## tried first and is wrong: a road that then stops 140 units short can land its
+## new end in the middle of a road running along the edge, which
+## test_no_dead_end_is_a_missed_junction caught on three of them. So the roads
+## are left exactly where the survey puts them and the WALL moves out instead.
+##
+## 200 units is half the widest road this importer can produce (primary, 400),
+## so no slab of any class can reach the wall whatever the next extract holds.
+## The land it creates is verge, and it is where the dead end signs stand.
+const EDGE_MARGIN_UNITS: float = 200.0
+
+## Shortest segment a clipped road end may keep, world units. A stub shorter
+## than this is the clip landing a few units from a surveyed vertex, not a
+## feature of the road, and RoadGraph welds only within half a unit so it would
+## otherwise survive as an edge with a node of its own. 20 units is a fifth of a
+## truck length, far below anything a driver could see.
+const MIN_VERTEX_SPACING: float = 20.0
 
 ## World units per real metre, and the whole reason for the number.
 ##
@@ -175,16 +236,40 @@ const INCIDENT_MIN_SPACING_METRES: float = 60.0
 var _metres_per_degree_latitude: float = 0.0
 var _metres_per_degree_longitude: float = 0.0
 var _world_bounds: Rect2 = Rect2()
+var _clip_bounds: Rect2 = Rect2()
 var _log: Array[String] = []
+
+
+## The CLIP box: the download box grown by the margins above. Every projection
+## and every clip in this file works from these, never from the QUERY_ values.
+var _min_lat: float = 0.0
+var _max_lat: float = 0.0
+var _min_lon: float = 0.0
+var _max_lon: float = 0.0
 
 
 func _initialize() -> void:
 	_metres_per_degree_latitude = _metres_per_degree_lat(CENTRE_LAT)
 	_metres_per_degree_longitude = _metres_per_degree_lon(CENTRE_LAT)
+
+	_min_lat = QUERY_MIN_LAT - CLIP_MARGIN_SOUTH_METRES / _metres_per_degree_latitude
+	_max_lat = QUERY_MAX_LAT + CLIP_MARGIN_NORTH_METRES / _metres_per_degree_latitude
+	_min_lon = QUERY_MIN_LON - CLIP_MARGIN_WEST_METRES / _metres_per_degree_longitude
+	_max_lon = QUERY_MAX_LON + CLIP_MARGIN_EAST_METRES / _metres_per_degree_longitude
+
+	# The geographic box, in world units, sitting one verge in from the origin;
+	# then the world, which is that box with the verge all the way round it.
+	# _project puts the box's north west corner at (EDGE_MARGIN, EDGE_MARGIN),
+	# so every coordinate on the map stays positive.
+	_clip_bounds = Rect2(
+		EDGE_MARGIN_UNITS, EDGE_MARGIN_UNITS,
+		(_max_lon - _min_lon) * _metres_per_degree_longitude * UNITS_PER_METRE,
+		(_max_lat - _min_lat) * _metres_per_degree_latitude * UNITS_PER_METRE
+	)
 	_world_bounds = Rect2(
 		0.0, 0.0,
-		(MAX_LON - MIN_LON) * _metres_per_degree_longitude * UNITS_PER_METRE,
-		(MAX_LAT - MIN_LAT) * _metres_per_degree_latitude * UNITS_PER_METRE
+		_clip_bounds.size.x + EDGE_MARGIN_UNITS * 2.0,
+		_clip_bounds.size.y + EDGE_MARGIN_UNITS * 2.0
 	)
 
 	var elements: Array = _read_elements()
@@ -266,8 +351,8 @@ static func _metres_per_degree_lon(latitude_degrees: float) -> float:
 ## points down the screen and north has to be up.
 func _project(latitude: float, longitude: float) -> Vector2:
 	return Vector2(
-		(longitude - MIN_LON) * _metres_per_degree_longitude * UNITS_PER_METRE,
-		(MAX_LAT - latitude) * _metres_per_degree_latitude * UNITS_PER_METRE
+		EDGE_MARGIN_UNITS + (longitude - _min_lon) * _metres_per_degree_longitude * UNITS_PER_METRE,
+		EDGE_MARGIN_UNITS + (_max_lat - latitude) * _metres_per_degree_latitude * UNITS_PER_METRE
 	)
 
 
@@ -336,10 +421,10 @@ func _import(elements: Array) -> MapDefinition:
 	definition.geographic_bounds = {
 		"centre_latitude": CENTRE_LAT,
 		"centre_longitude": CENTRE_LON,
-		"min_latitude": MIN_LAT,
-		"max_latitude": MAX_LAT,
-		"min_longitude": MIN_LON,
-		"max_longitude": MAX_LON,
+		"min_latitude": _min_lat,
+		"max_latitude": _max_lat,
+		"min_longitude": _min_lon,
+		"max_longitude": _max_lon,
 		"units_per_metre": UNITS_PER_METRE,
 		"metres_per_degree_latitude": _metres_per_degree_latitude,
 		"metres_per_degree_longitude": _metres_per_degree_longitude,
@@ -490,7 +575,12 @@ func _split_way(way: Dictionary, node_uses: Dictionary) -> Array[Dictionary]:
 
 	# Clip first, so a way that leaves the box comes back as one or more runs
 	# that stop cleanly on the boundary instead of trailing off the map.
-	var runs: Array = _clip_to_box(node_ids, geometry)
+	#
+	# Clipped to the GEOGRAPHIC box, which is not the world: the world is that
+	# box with a verge around it (see EDGE_MARGIN_UNITS). Every centreline
+	# therefore stops on the geographic boundary exactly as it always did, and
+	# the slab it carries is still a comfortable margin inside the wall.
+	var runs: Array = _clip_to_box(node_ids, geometry, _clip_bounds)
 
 	var out: Array[Dictionary] = []
 	for run in runs:
@@ -535,7 +625,7 @@ func _split_way(way: Dictionary, node_uses: Dictionary) -> Array[Dictionary]:
 ## Points created on the boundary carry node id -1: they are not real OSM nodes
 ## and must never be treated as shared, or two unrelated roads that happen to
 ## leave the map at the same place would be welded into a junction.
-func _clip_to_box(node_ids: Array, geometry: Array) -> Array:
+func _clip_to_box(node_ids: Array, geometry: Array, box: Rect2) -> Array:
 	var points: Array = []
 	var ids: Array = []
 	for i in range(geometry.size()):
@@ -549,7 +639,7 @@ func _clip_to_box(node_ids: Array, geometry: Array) -> Array:
 	for i in range(points.size() - 1):
 		var a: Vector2 = points[i]
 		var b: Vector2 = points[i + 1]
-		var span: Variant = _clip_segment(a, b)
+		var span: Variant = _clip_segment(a, b, box)
 		if span == null:
 			if current_points.size() >= 2:
 				runs.append({"points": current_points, "ids": current_ids})
@@ -575,22 +665,63 @@ func _clip_to_box(node_ids: Array, geometry: Array) -> Array:
 
 	if current_points.size() >= 2:
 		runs.append({"points": current_points, "ids": current_ids})
-	return runs
+
+	var tidied: Array = []
+	for run in runs:
+		var trimmed: Dictionary = _drop_end_stubs(run)
+		if trimmed["points"].size() >= 2:
+			tidied.append(trimmed)
+	return tidied
+
+
+## Drops a boundary point that landed within a stub's length of the vertex next
+## to it (Milestone 8 Part 2).
+##
+## The clip puts a new point exactly where the way crosses the box. When the
+## way's own next vertex is a few units inside, that leaves a segment a few
+## units long at the end of the road, and RoadGraph welds vertices only within
+## half a unit, so the stub survives as a real edge with a node of its own. On
+## the widened Windsor box three roads ended in a stub like that, and each one
+## then read as a dead end standing in the middle of the pavement of the very
+## road it was part of: 7.2 units from its own next segment's centreline, which
+## test_no_dead_end_is_a_missed_junction reports, correctly, as a junction that
+## should exist and does not.
+##
+## The boundary point is the one dropped, never the surveyed vertex, so the road
+## ends a few units inside the box instead of exactly on it and its direction is
+## untouched.
+static func _drop_end_stubs(run: Dictionary) -> Dictionary:
+	var points: Array = run["points"].duplicate()
+	var ids: Array = run["ids"].duplicate()
+
+	# Leading: only a clipped point, id -1, may be dropped.
+	while points.size() >= 3 and int(ids[0]) < 0:
+		if Vector2(points[0]).distance_to(points[1]) > MIN_VERTEX_SPACING:
+			break
+		points.remove_at(0)
+		ids.remove_at(0)
+	while points.size() >= 3 and int(ids[ids.size() - 1]) < 0:
+		if Vector2(points[points.size() - 1]).distance_to(points[points.size() - 2]) > MIN_VERTEX_SPACING:
+			break
+		points.remove_at(points.size() - 1)
+		ids.remove_at(ids.size() - 1)
+
+	return {"points": points, "ids": ids}
 
 
 ## The part of segment a-b that lies inside the box, as [t0, t1] along it, or
 ## null when none of it does. Liang-Barsky: four half-plane tests, exact, and it
 ## answers the outside-to-outside crossing case that a vertex test cannot.
-func _clip_segment(a: Vector2, b: Vector2) -> Variant:
+func _clip_segment(a: Vector2, b: Vector2, box: Rect2) -> Variant:
 	var low: float = 0.0
 	var high: float = 1.0
 	var delta: Vector2 = b - a
 	var edge_directions: Array[float] = [-delta.x, delta.x, -delta.y, delta.y]
 	var edge_distances: Array[float] = [
-		a.x - _world_bounds.position.x,
-		_world_bounds.position.x + _world_bounds.size.x - a.x,
-		a.y - _world_bounds.position.y,
-		_world_bounds.position.y + _world_bounds.size.y - a.y,
+		a.x - box.position.x,
+		box.end.x - a.x,
+		a.y - box.position.y,
+		box.end.y - a.y,
 	]
 
 	for i in range(4):
@@ -1245,7 +1376,18 @@ func _kerb_position(graph: RoadGraph, node: int) -> Vector2:
 	var along: Vector2 = (graph.positions[other] - graph.positions[node]).normalized()
 	var half_width: float = float(edge["width"]) * 0.5
 	var base: Vector2 = graph.positions[node] + along * (half_width * 1.6)
-	return base + Vector2(-along.y, along.x) * (half_width + HYDRANT_STANDOFF)
+
+	# Offset from the road actually NEAREST that point, by that road's own half
+	# width, rather than from this arm by this arm's (Milestone 8 Part 2).
+	#
+	# The two are the same road at most junctions and are not at a junction
+	# where a wide road meets a narrow one at an angle: the old rule stepped out
+	# by the wide arm's half width along a line that left it 215 units from the
+	# narrow road that was really nearest, against the 200 the validator allows,
+	# and h_syn_7 on the widened Windsor box was exactly that. Measuring against
+	# the road the validator will measure against is the whole fix.
+	var near: Dictionary = graph.nearest_road(base)
+	return _kerb_beside(graph, base, float(near["width"]) * 0.5 + HYDRANT_STANDOFF)
 
 
 ## A point at the kerb beside an arbitrary spot on a road.

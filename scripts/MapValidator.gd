@@ -65,6 +65,7 @@ static func validate(definition: MapDefinition) -> Array[Dictionary]:
 		_check_roads_only_overlap_at_junctions(definition, graph),
 		_check_buildings_are_off_the_road(definition, graph),
 		_check_no_two_buildings_overlap(definition),
+		_check_nothing_runs_off_the_map(definition, graph),
 		_check_the_land_between_the_roads_is_buildable(definition, graph),
 	]
 
@@ -143,6 +144,84 @@ static func _polygon_bounds(polygon: PackedVector2Array) -> Rect2:
 	for point in polygon:
 		box = box.expand(point)
 	return box
+
+
+## How far outside the world bounds anything may reach before it counts, world
+## units. Absorbs float noise in a saved resource and nothing else.
+const EDGE_EPSILON: float = 1.0
+
+
+## Rule 7. Nothing runs off the map: no junction sits on the boundary and no
+## asphalt passes under the wall.
+##
+## Windsor shipped with the junction of Shadetree Lane and Leafhaven Lane 2.5
+## metres outside its own download box. The two roads arrived as two dead ends
+## 83 units apart at the top wall with the turn between them off the map, so
+## half of a real turn was beyond something the truck cannot drive through, and
+## the camera pinned the player to the top of the screen while they drove at it.
+## Twenty-two road slabs also ran under the boundary wall: asphalt drawn past
+## the thing that stops the truck.
+##
+## Two questions, because the fixes are different and either can regress alone.
+## A junction on the edge is a clip box in the wrong place, fixed by moving the
+## box; a slab under the wall is a centreline clipped to the boundary rather
+## than to the boundary less half its own width.
+##
+## Junctions only, three arms or more. A two-arm node is a bend in one road, and
+## a road is allowed to bend as it approaches the edge it ends at.
+static func _check_nothing_runs_off_the_map(
+	definition: MapDefinition, graph: RoadGraph
+) -> Dictionary:
+	const RULE: String = "no junction sits on the map edge and no road runs under the wall"
+	var bounds: Rect2 = definition.world_bounds
+
+	var junctions: Array[String] = []
+	for node in range(graph.positions.size()):
+		if graph.incident_edges.get(node, []).size() < 3:
+			continue
+		var fill: PackedVector2Array = MapGeometry.junction_fill(graph, node)
+		if fill.size() < 3:
+			continue
+		var out: float = _how_far_outside(fill, bounds)
+		if out < -EDGE_EPSILON:
+			continue
+		if junctions.size() < 5:
+			junctions.append("junction at %s reaches %.0f past the edge" % [
+				graph.positions[node], out
+			])
+
+	var slabs: Array[String] = []
+	for edge in graph.edges:
+		var a: Vector2 = graph.positions[int(edge["a"])]
+		var b: Vector2 = graph.positions[int(edge["b"])]
+		if a.distance_to(b) <= 0.0:
+			continue
+		var slab: PackedVector2Array = MapGeometry.oriented_slab(a, b, float(edge["width"]))
+		var past: float = _how_far_outside(slab, bounds)
+		if past <= EDGE_EPSILON:
+			continue
+		if slabs.size() < 5:
+			slabs.append("road at %s runs %.0f past the wall" % [(a + b) / 2.0, past])
+
+	if junctions.is_empty() and slabs.is_empty():
+		return _result(RULE, true, "%d junction(s) and %d road slab(s), all inside the world" % [
+			graph.junction_nodes().size(), graph.edges.size()
+		])
+	return _result(
+		RULE, false, "%s" % ", ".join(junctions + slabs)
+	)
+
+
+## How far the furthest point of a polygon lies outside a rectangle. Negative
+## when the whole polygon is inside, and then it is the clearance.
+static func _how_far_outside(polygon: PackedVector2Array, bounds: Rect2) -> float:
+	var worst: float = -INF
+	for point in polygon:
+		worst = maxf(worst, maxf(
+			maxf(bounds.position.x - point.x, point.x - bounds.end.x),
+			maxf(bounds.position.y - point.y, point.y - bounds.end.y)
+		))
+	return worst
 
 
 ## Rule 1. Every piece of road reachable from the station, in one graph, with

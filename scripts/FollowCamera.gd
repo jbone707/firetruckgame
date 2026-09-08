@@ -33,8 +33,17 @@ const LOOK_AHEAD_DISTANCE: float = 220.0
 const MAX_SHAKE: float = 16.0
 const SHAKE_SECONDS: float = 0.28
 
+## How far past the map's own bounds the view may reach, as a fraction of the
+## screen's HEIGHT at the zoom in use (Milestone 8 Part 2). Half a screen.
+##
+## In screens rather than world units on purpose: the whole point is where the
+## truck sits in the FRAME, and the same world distance is a different fraction
+## of the frame at each of the three zoom levels.
+const OVERSCAN_SCREENS: float = 0.5
+
 var target: Node2D = null
 
+var _bounds: Rect2 = Rect2()
 var _zoom_level: float = ZOOM
 var _look_ahead: Vector2 = Vector2.ZERO
 var _shake_remaining: float = 0.0
@@ -50,13 +59,13 @@ func _ready() -> void:
 	limit_smoothed = true
 
 
-## Changes how much world the view takes in. Godot's own limit clamping is
-## expressed in world units and already accounts for the zoom, so the edge walls
-## stay off screen at every level without the limits being recomputed; the lead
-## is not, and is scaled here.
+## Changes how much world the view takes in, and re-derives everything measured
+## against the screen rather than against the world: the limits, because the
+## overscan is half a screen, and the lead, which is read live.
 func set_zoom_level(level: float) -> void:
 	_zoom_level = maxf(level, 0.01)
 	zoom = Vector2(_zoom_level, _zoom_level)
+	_apply_limits()
 
 
 func get_zoom_level() -> float:
@@ -70,14 +79,44 @@ func get_look_ahead_distance() -> float:
 	return LOOK_AHEAD_DISTANCE * (ZOOM / _zoom_level)
 
 
-## Clamps the view to the playable extent so the player never sees past the
-## edge walls. Called once by Main after the map is built.
+## Clamps the view to the playable extent, plus an overscan (Milestone 8
+## Part 2). Called by Main after the map is built, and again whenever the zoom
+## changes, because the overscan is measured in SCREEN height and so is a
+## different number of world units at every zoom level.
+##
+## Before the overscan the limits were the world bounds exactly, which meant the
+## camera stopped dead as the truck approached a wall and the truck slid to the
+## edge of the screen and sat there, half a truck from the frame. At the top
+## edge of Windsor, where a road ran right up to the wall, the player drove the
+## last stretch pinned to the top of the view with nothing ahead of them. Half a
+## screen of overscan keeps the truck near the middle of the frame everywhere,
+## and MapBuilder draws a dark band outside the map so the overscan shows ground
+## rather than the viewport's clear colour.
 func apply_world_bounds(bounds: Rect2) -> void:
+	_bounds = bounds
+	_apply_limits()
+
+
+func _apply_limits() -> void:
+	if _bounds.size == Vector2.ZERO:
+		return
+	var overscan: Vector2 = _overscan()
 	limit_enabled = true
-	limit_left = int(bounds.position.x)
-	limit_top = int(bounds.position.y)
-	limit_right = int(bounds.position.x + bounds.size.x)
-	limit_bottom = int(bounds.position.y + bounds.size.y)
+	limit_left = int(_bounds.position.x - overscan.x)
+	limit_top = int(_bounds.position.y - overscan.y)
+	limit_right = int(_bounds.end.x + overscan.x)
+	limit_bottom = int(_bounds.end.y + overscan.y)
+
+
+## How far past the world the view may reach, in world units: half the screen's
+## height at the zoom in use, on both axes. Half a SCREEN rather than a fixed
+## distance, so the truck sits the same way in the frame at every zoom level.
+func _overscan() -> Vector2:
+	var view: Vector2 = Vector2(get_viewport_rect().size)
+	if view == Vector2.ZERO:
+		view = Vector2(1280.0, 720.0)
+	var half_height: float = (view.y / _zoom_level) * 0.5
+	return Vector2(half_height, half_height) * OVERSCAN_SCREENS
 
 
 func snap_to_target() -> void:

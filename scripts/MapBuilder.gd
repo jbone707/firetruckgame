@@ -66,6 +66,49 @@ const LOT_LAYER: int = 0b10000  # layer 5, world_lot
 const WALL_THICKNESS: float = 40.0
 
 # ---------------------------------------------------------------------------
+# Map-edge terminus (Milestone 8 Part 2)
+# ---------------------------------------------------------------------------
+
+## A road that reaches the edge of the map now STOPS, visibly, rather than
+## running under the boundary wall and out of the world. The importer pulls
+## every centreline in by half its own width so no asphalt passes the wall; this
+## is what the player sees at the end of it.
+##
+## Two things, because they say different things. The barricade says "the road
+## stops here", and is on the asphalt where the truck will hit it. The sign says
+## "this is the edge of the map, not a route", and is readable from far enough
+## back to turn around before arriving. James asked for the sign specifically.
+
+## How close a dead end must be to the boundary to count as the map running out
+## rather than as a cul-de-sac. One road width: a genuine cul-de-sac in the
+## middle of the neighbourhood gets nothing, because it is a real place a real
+## street ends, and barricading it would be a lie about the map's own edge.
+const TERMINUS_EDGE_REACH_WIDTHS: float = 1.0
+
+## The barricade: a bar across the asphalt at the road's end, in alternating
+## stripes. Drawn on the road, not across the wall, so it reads as the end of
+## the carriageway.
+const BARRICADE_DEPTH: float = 26.0
+const BARRICADE_STRIPE_WIDTH: float = 46.0
+const BARRICADE_LIGHT: Color = Color(0.88, 0.86, 0.82)
+const BARRICADE_DARK: Color = Color(0.70, 0.24, 0.18)
+
+## The dead end sign: the American yellow diamond with a black T, which is what
+## the road it is standing on would carry. Placed past the barricade, in the
+## land between the road's end and the wall, turned so the driver reads it
+## square on coming down the road.
+const SIGN_SIZE: float = 88.0
+const SIGN_STANDOFF: float = 72.0
+const SIGN_FACE: Color = Color(0.92, 0.78, 0.16)
+const SIGN_EDGE: Color = Color(0.16, 0.14, 0.10)
+const SIGN_GLYPH_WIDTH: float = 9.0
+
+## The land outside the map, drawn so the camera's overscan shows ground rather
+## than void. Deliberately flat and dark: it is not somewhere to go.
+const OUTSIDE_COLOR: Color = Color(0.13, 0.16, 0.12)
+const OUTSIDE_MARGIN: float = 3000.0
+
+# ---------------------------------------------------------------------------
 # Buildings (Milestone 6 Part 1)
 # ---------------------------------------------------------------------------
 
@@ -181,6 +224,7 @@ const LABEL_MIN_SEPARATION: float = 1200.0
 ## the kerb: there is no shared edge between two fills to alias along, only one
 ## fill ending on another, with the kerb line drawn last over the join. The
 ## yards sit above the sidewalk for the same reason on the far side.
+const Z_OUTSIDE: int = -1
 const Z_SIDEWALK: int = 0
 const Z_ROAD: int = 1
 const Z_ROAD_MARKING: int = 2
@@ -191,8 +235,9 @@ const Z_FENCE: int = 6
 const Z_BUILDING_SHADOW: int = 7
 const Z_BUILDING_ROOF: int = 8
 const Z_BUILDING_EDGE: int = 9
-const Z_LABEL: int = 10
-const Z_MARKER: int = 11  # reserved: nothing draws at this level today
+const Z_TERMINUS: int = 10
+const Z_LABEL: int = 11
+const Z_MARKER: int = 12  # reserved: nothing draws at this level today
 
 var _definition: MapDefinition = null
 var _graph: RoadGraph = null
@@ -254,6 +299,8 @@ func build(definition: MapDefinition) -> void:
 	# with its own interaction ring, and only the dispatched call is marked, by
 	# FireIncident. Markers above is the empty layer they would go back in.
 
+	_build_outside_ground(roads_root, bounds)
+	_build_edge_terminus(markers_root, bounds)
 	_build_edge_walls(walls_root, bounds)
 
 
@@ -910,6 +957,143 @@ func _nearest_road_point(point: Vector2) -> Dictionary:
 			best = {"point": candidate, "width": float(edge["width"])}
 	return best
 
+
+
+# ---------------------------------------------------------------------------
+# The map edge: what is beyond it, and what says so
+# ---------------------------------------------------------------------------
+
+## A plain dark band all the way round the outside of the map.
+##
+## The camera is now allowed to look past the world bounds (FollowCamera's
+## overscan), so that the truck is never pinned against the screen edge when it
+## drives up to the wall. Without something drawn out there the overscan would
+## show the viewport's clear colour, which reads as a hole in the world rather
+## than as the edge of it. One ring of four rectangles, below everything.
+func _build_outside_ground(parent: Node2D, bounds: Rect2) -> void:
+	var outer: Rect2 = bounds.grow(OUTSIDE_MARGIN)
+	var bands: Array[Rect2] = [
+		Rect2(outer.position.x, outer.position.y, outer.size.x, bounds.position.y - outer.position.y),
+		Rect2(outer.position.x, bounds.end.y, outer.size.x, outer.end.y - bounds.end.y),
+		Rect2(outer.position.x, bounds.position.y, bounds.position.x - outer.position.x, bounds.size.y),
+		Rect2(bounds.end.x, bounds.position.y, outer.end.x - bounds.end.x, bounds.size.y),
+	]
+	for index in range(bands.size()):
+		var band := Polygon2D.new()
+		band.name = "Outside_%d" % index
+		band.polygon = MapGeometry.rect_polygon(bands[index])
+		band.color = OUTSIDE_COLOR
+		band.z_index = Z_OUTSIDE
+		parent.add_child(band)
+
+
+## A barricade and a dead end sign at every road that runs out at the map edge.
+##
+## Which ends count is TERMINUS_EDGE_REACH_WIDTHS: a dead end within one road
+## width of the boundary is the map running out, and a dead end further in is a
+## cul-de-sac, which is a real place a real street ends and gets nothing.
+func _build_edge_terminus(parent: Node2D, bounds: Rect2) -> void:
+	if _graph == null:
+		return
+	for node in range(_graph.positions.size()):
+		var incident: Array = _graph.incident_edges.get(node, [])
+		if incident.size() != 1:
+			continue
+		var here: Vector2 = _graph.positions[node]
+		var edge: Dictionary = _graph.edges[int(incident[0])]
+		var width: float = float(edge["width"])
+		if _distance_to_boundary(here, bounds) > width * TERMINUS_EDGE_REACH_WIDTHS:
+			continue
+
+		var other: int = int(edge["b"]) if int(edge["a"]) == node else int(edge["a"])
+		var outward: Vector2 = (here - _graph.positions[other]).normalized()
+		if outward == Vector2.ZERO:
+			continue
+
+		_build_barricade(parent, node, here, outward, width)
+		_build_dead_end_sign(parent, node, here + outward * SIGN_STANDOFF, outward)
+
+
+## The bar across the asphalt, in alternating stripes, at the very end of the
+## carriageway. Built stripe by stripe across the road rather than as one
+## striped texture, because this project draws with polygons and no assets.
+func _build_barricade(
+	parent: Node2D, node: int, at: Vector2, outward: Vector2, width: float
+) -> void:
+	var across := Vector2(-outward.y, outward.x)
+	var stripes: int = maxi(2, int(round(width / BARRICADE_STRIPE_WIDTH)))
+	var stripe: float = width / float(stripes)
+	var back: Vector2 = at - outward * BARRICADE_DEPTH
+	for i in range(stripes):
+		var from: float = -width / 2.0 + stripe * float(i)
+		var bar := Polygon2D.new()
+		bar.name = "Barricade_%d_%d" % [node, i]
+		bar.polygon = PackedVector2Array([
+			back + across * from,
+			back + across * (from + stripe),
+			at + across * (from + stripe),
+			at + across * from,
+		])
+		bar.color = BARRICADE_LIGHT if i % 2 == 0 else BARRICADE_DARK
+		bar.z_index = Z_TERMINUS
+		parent.add_child(bar)
+
+
+## The sign: a yellow diamond with a black T, which is what a road in Windsor
+## would actually carry at a dead end. Turned so that "up" on the sign points
+## back down the road at the driver, which is the only orientation that reads
+## from a car in a top-down view.
+func _build_dead_end_sign(
+	parent: Node2D, node: int, at: Vector2, outward: Vector2
+) -> void:
+	var up: Vector2 = -outward
+	var right := Vector2(-up.y, up.x)
+	var half: float = SIGN_SIZE / 2.0
+
+	var face := Polygon2D.new()
+	face.name = "DeadEndSign_%d" % node
+	face.polygon = PackedVector2Array([
+		at + up * half, at + right * half, at - up * half, at - right * half,
+	])
+	face.color = SIGN_FACE
+	face.z_index = Z_TERMINUS
+	parent.add_child(face)
+
+	var border := Line2D.new()
+	border.name = "DeadEndSignEdge_%d" % node
+	border.points = face.polygon
+	border.closed = true
+	border.width = 5.0
+	border.default_color = SIGN_EDGE
+	border.z_index = Z_TERMINUS
+	parent.add_child(border)
+
+	# The T: a stem up the middle and a bar across the top of it.
+	var stem := Line2D.new()
+	stem.name = "DeadEndSignStem_%d" % node
+	stem.points = PackedVector2Array([at - up * half * 0.42, at + up * half * 0.10])
+	stem.width = SIGN_GLYPH_WIDTH
+	stem.default_color = SIGN_EDGE
+	stem.z_index = Z_TERMINUS
+	parent.add_child(stem)
+
+	var bar := Line2D.new()
+	bar.name = "DeadEndSignBar_%d" % node
+	bar.points = PackedVector2Array([
+		at + up * half * 0.10 - right * half * 0.40,
+		at + up * half * 0.10 + right * half * 0.40,
+	])
+	bar.width = SIGN_GLYPH_WIDTH
+	bar.default_color = SIGN_EDGE
+	bar.z_index = Z_TERMINUS
+	parent.add_child(bar)
+
+
+static func _distance_to_boundary(point: Vector2, bounds: Rect2) -> float:
+	return minf(
+		minf(point.x - bounds.position.x, bounds.end.x - point.x),
+		minf(point.y - bounds.position.y, bounds.end.y - point.y)
+	)
 
 
 # ---------------------------------------------------------------------------

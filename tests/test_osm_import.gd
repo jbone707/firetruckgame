@@ -91,6 +91,18 @@ func test_no_dead_end_is_a_missed_junction() -> void:
 			var edge: Dictionary = graph.edges[edge_index]
 			if int(edge["a"]) == node or int(edge["b"]) == node:
 				continue
+			# A road's own continuation does not count (Milestone 8 Part 2).
+			# The question here is whether a dead end is standing in SOMEONE
+			# ELSE'S street, which is a junction that should exist and does not.
+			# A road that bends shortly before it ends always has its own end
+			# within half a width of its next segment, because that is what a
+			# bend in a 280 unit road looks like, and Leafhaven Lane and
+			# Cockspur Court both do exactly that at the widened box edge. A
+			# road overlapping its own pavement is covered separately, and
+			# correctly, by the validator's "no two roads overlap outside a
+			# junction".
+			if int(edge["road_index"]) == int(own_edge["road_index"]):
+				continue
 			var a: Vector2 = graph.positions[int(edge["a"])]
 			var b: Vector2 = graph.positions[int(edge["b"])]
 			var distance: float = point.distance_to(
@@ -210,11 +222,27 @@ func test_the_land_is_drawn_at_the_chosen_scale_and_the_roads_are_not() -> void:
 		float(map.geographic_bounds.get("units_per_metre", 0.0)), 14.0, 0.001,
 		"the land is projected at 14 world units per metre"
 	)
+	# 7,820 by 6,140, and where each part of that comes from (Milestone 8
+	# Part 2). The land scale did NOT change; the box the land is taken from
+	# did, twice over:
+	#
+	#   530 m by 410 m at 14 units per metre  = 7,420 by 5,740
+	#   plus a 200 unit verge on all four sides = 7,820 by 6,140
+	#
+	# The 530 by 410 metre box is the 500 by 380 download box grown 30 m north
+	# and 30 m east, to bring the Shadetree Lane and Leafhaven Lane junction
+	# inside the map instead of cutting it in half. The verge is the strip
+	# between the last road and the boundary wall, so no road slab runs under
+	# the wall. Both are stated in tools/import_osm.gd with their reasons.
 	assert_almost_eq(
-		map.world_bounds.size.x, 7000.0, 1.0, "which makes the world 7,000 units across"
+		map.world_bounds.size.x, 7820.0, 1.0, "which makes the world 7,820 units across"
 	)
 	assert_almost_eq(
-		map.world_bounds.size.y, 5320.0, 1.0, "and 5,320 down"
+		map.world_bounds.size.y, 6140.0, 1.0, "and 6,140 down"
+	)
+	assert_almost_eq(
+		float(map.geographic_bounds.get("max_latitude", 0.0)), 38.5459712, 0.0000005,
+		"the clip box reaches 30 m north of the downloaded box"
 	)
 
 	var residential: Array[float] = []
