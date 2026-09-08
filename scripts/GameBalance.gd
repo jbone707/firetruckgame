@@ -179,6 +179,42 @@ var tank_upgrade_multiplier: float = 1.25
 ## Truck condition (health) at the start of each shift, on a 0-100 scale.
 var truck_starting_condition: float = 100.0 # invented default, not from handoff
 
+## How far, in route units along the roads, the FIRST call of a shift must be
+## from the station. Every later call keeps the spacing the candidates were
+## imported with and nothing else.
+##
+## The first call is the one the player has no warm-up for: it arrives the
+## instant the shift starts, from a standing start at the station, and a
+## candidate a few hundred units up the road is over before the player has
+## finished reading the radio line. 2000 route units is about nine seconds at
+## the measured door-to-door speed of 220 units/second, which is a drive rather
+## than a hop, and is well inside the escalation allowance that same distance
+## earns (2000 / escalation_travel_speed is 18 seconds on top of the base 45).
+##
+## Applied as a preference, not a requirement: if no candidate on a map is that
+## far from the station, the farthest one is used rather than the shift failing
+## to start. See DispatchManager.order_first_call.
+var first_call_min_route: float = 2000.0 # invented default, not from handoff
+
+# ---------------------------------------------------------------------------
+# Camera (handoff §4, §7)
+# ---------------------------------------------------------------------------
+
+## The zoom levels the development Z key cycles through, wide to wider. Below
+## 1.0 means the view takes in MORE world, not less.
+##
+## THREE LEVELS ON PURPOSE, AND NONE OF THEM IS THE ANSWER YET. James asked to
+## be able to cycle them while playing rather than have a number guessed for
+## him: the question is whether the view feels like "the area you selected", and
+## that is a thing you know by looking, not by arithmetic. The first entry is
+## the current behaviour, so nothing changes until a key is pressed. He picks
+## after playing; the next milestone pins the choice here and removes the key.
+##
+## At the 1280 unit design viewport these take in 1422, 1829 and 2327 units of
+## world across: about one street, about two, and about a third of Windsor's
+## width.
+var camera_zoom_levels: Array[float] = [0.9, 0.7, 0.55] # invented default, not from handoff
+
 
 # ---------------------------------------------------------------------------
 # Escalation travel allowance (handoff §5, sized in Milestone 4 Part 1)

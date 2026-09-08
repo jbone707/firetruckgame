@@ -12,10 +12,19 @@ class_name FollowCamera
 ## with the road width: a 280 unit road at 0.9 spans 252 of the 1280 unit design
 ## viewport, a little under a fifth of the screen, and the player can see about
 ## 700 units up the road ahead, which is roughly three seconds at top speed.
+##
+## This is the DEFAULT only. set_zoom below changes it during play, from the
+## list in GameBalance.camera_zoom_levels, so James can pick the one that feels
+## like the area he selected rather than have a number guessed for him.
 const ZOOM: float = 0.9
 
-## How far ahead of the truck the camera leads, in world units at full speed.
-## Handoff section 4 asks for reasonable forward visibility.
+## How far ahead of the truck the camera leads, in world units at full speed, at
+## the DEFAULT zoom. Handoff section 4 asks for reasonable forward visibility.
+##
+## Scaled by the zoom actually in use, because the lead is a fraction of the
+## screen and not a distance in the world: 220 units at 0.9 is a sixth of the
+## way to the edge of the view, and holding it at 220 while the view took in
+## two and a half times as much world would quietly turn the lead off.
 const LOOK_AHEAD_DISTANCE: float = 220.0
 
 ## Impact shake: how far the view is thrown at a full speed crash, world units,
@@ -26,6 +35,7 @@ const SHAKE_SECONDS: float = 0.28
 
 var target: Node2D = null
 
+var _zoom_level: float = ZOOM
 var _look_ahead: Vector2 = Vector2.ZERO
 var _shake_remaining: float = 0.0
 var _shake_strength: float = 0.0
@@ -34,10 +44,30 @@ var _shake_strength: float = 0.0
 func _ready() -> void:
 	rotation = 0.0
 	ignore_rotation = true
-	zoom = Vector2(ZOOM, ZOOM)
+	set_zoom_level(_zoom_level)
 	position_smoothing_enabled = true
 	position_smoothing_speed = 6.0
 	limit_smoothed = true
+
+
+## Changes how much world the view takes in. Godot's own limit clamping is
+## expressed in world units and already accounts for the zoom, so the edge walls
+## stay off screen at every level without the limits being recomputed; the lead
+## is not, and is scaled here.
+func set_zoom_level(level: float) -> void:
+	_zoom_level = maxf(level, 0.01)
+	zoom = Vector2(_zoom_level, _zoom_level)
+
+
+func get_zoom_level() -> float:
+	return _zoom_level
+
+
+## The camera lead at the zoom currently in use. Public because the off-screen
+## call arrow and the physics runner both need to know what the view is doing,
+## and neither should be re-deriving it.
+func get_look_ahead_distance() -> float:
+	return LOOK_AHEAD_DISTANCE * (ZOOM / _zoom_level)
 
 
 ## Clamps the view to the playable extent so the player never sees past the
@@ -70,7 +100,7 @@ func _physics_process(delta: float) -> void:
 		var speed_ratio: float = clampf(
 			truck.get_forward_speed() / truck.balance.forward_max_speed, -1.0, 1.0
 		)
-		desired_look_ahead = truck.get_forward() * LOOK_AHEAD_DISTANCE * speed_ratio
+		desired_look_ahead = truck.get_forward() * get_look_ahead_distance() * speed_ratio
 
 	# Ease the lead in rather than snapping it, so a hard turn does not whip
 	# the view across the screen.
@@ -98,6 +128,11 @@ func _physics_process(delta: float) -> void:
 ## to keep the world north up, and a rotating shake would undo that for as long
 ## as it lasted.
 func shake(impact_speed: float) -> void:
-	var strength: float = clampf(impact_speed / 250.0, 0.0, 1.0) * MAX_SHAKE
+	# Scaled by the zoom for the same reason the lead is: MAX_SHAKE is written
+	# as a world distance but is meant as a fraction of the screen, and a jolt
+	# that is barely a pixel at the widest zoom is not a jolt.
+	var strength: float = (
+		clampf(impact_speed / 250.0, 0.0, 1.0) * MAX_SHAKE * (ZOOM / _zoom_level)
+	)
 	_shake_remaining = SHAKE_SECONDS
 	_shake_strength = maxf(_shake_strength, strength)

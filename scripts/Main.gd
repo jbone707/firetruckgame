@@ -27,6 +27,13 @@ var _hydrants: Array[Hydrant] = []
 var _save: SaveManager = null
 var _shop_status: String = ""
 
+## DEVELOPMENT ONLY, Milestone 6 Part 3: the transient line the zoom key
+## writes, and how long it stays up. Goes with the Z key block below.
+const DEV_MESSAGE_SECONDS: float = 1.0
+var _dev_message: String = ""
+var _dev_message_remaining: float = 0.0
+var _zoom_index: int = 0
+
 
 func _ready() -> void:
 	print(
@@ -105,7 +112,30 @@ func load_map(path: String) -> void:
 	_camera.apply_world_bounds(_map_builder.get_world_bounds())
 	_camera.snap_to_target()
 
-	_dispatch.setup(self, _map_builder.get_incident_candidates())
+	_dispatch.setup(
+		self, _map_builder.get_incident_candidates(), _routes_from_station()
+	)
+
+
+## How far every incident candidate is from the station along the roads, by
+## candidate id. Measured once here, at map load, because it is a property of
+## the map and the station and does not change between shifts; DispatchManager
+## uses it to keep the first call of a shift off the station's doorstep.
+##
+## Not to be confused with travel_distance_to, which measures from wherever the
+## truck IS at the moment a call is dispatched. That is the number the
+## escalation clock is priced from and it has to be live; this one must not be,
+## or the queue for a shift would depend on where the last shift ended.
+func _routes_from_station() -> Dictionary:
+	var graph: RoadGraph = _map_builder.get_road_graph()
+	if graph == null:
+		return {}
+	var station: Vector2 = get_station_spawn_position()
+	var routes: Dictionary = {}
+	for candidate in _map_builder.get_incident_candidates():
+		var route: float = graph.route_length(station, Vector2(candidate["position"]))
+		routes[String(candidate["id"])] = 0.0 if is_inf(route) else route
+	return routes
 
 
 func get_map_definition() -> MapDefinition:
@@ -215,15 +245,48 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("return_to_station"):
 		_on_return_to_station_requested()
 		get_viewport().set_input_as_handled()
+		return
+
+	# ---------------------------------------------------------------------
+	# DEVELOPMENT KEY, Milestone 6 Part 3. Cycles the camera through
+	# GameBalance.camera_zoom_levels so James can pick the one that feels like
+	# the area he selected, by looking rather than by arithmetic. The next
+	# milestone pins his choice as the only level and deletes this block, the
+	# _dev_message pair below, and the branch in _compose_prompt.
+	#
+	# Read as a raw key rather than through an input action on purpose: it is
+	# not part of the game's controls, it is not in project.godot's input map,
+	# and removing it should be deleting code and nothing else.
+	# ---------------------------------------------------------------------
+	if event is InputEventKey and event.pressed and not event.echo:
+		var key: InputEventKey = event
+		if key.physical_keycode == KEY_Z:
+			_cycle_camera_zoom()
+			get_viewport().set_input_as_handled()
 
 
-func _physics_process(_delta: float) -> void:
+## DEVELOPMENT ONLY. See the Z key block above.
+func _cycle_camera_zoom() -> void:
+	var levels: Array[float] = _session.balance.camera_zoom_levels
+	if levels.is_empty():
+		return
+	_zoom_index = (_zoom_index + 1) % levels.size()
+	_camera.set_zoom_level(levels[_zoom_index])
+	_dev_message = "Zoom %s" % String.num(levels[_zoom_index], 2)
+	_dev_message_remaining = DEV_MESSAGE_SECONDS
+
+
+func _physics_process(delta: float) -> void:
 	# This node is PROCESS_MODE_ALWAYS so that Escape still reaches it while
 	# paused, which means this callback also keeps running. The truck itself is
 	# PAUSABLE and frozen, but holding a key while paused must not queue up an
 	# intent that fires the instant the game resumes.
 	if get_tree().paused or _session.state != GameSession.State.PLAYING:
 		return
+
+	# DEVELOPMENT ONLY, goes with the zoom key.
+	if _dev_message_remaining > 0.0:
+		_dev_message_remaining = maxf(_dev_message_remaining - delta, 0.0)
 
 	var throttle: float = (
 		Input.get_action_strength("drive_throttle") - Input.get_action_strength("drive_brake")
@@ -292,6 +355,11 @@ func _update_hydrants() -> void:
 ## One prompt line, chosen by priority. An empty tank is the most urgent thing
 ## the player can be told, so it wins over a hydrant prompt.
 func _compose_prompt(hydrant_prompt: int) -> String:
+	# DEVELOPMENT ONLY, removed with the zoom key it belongs to. It sits above
+	# everything because it is an answer to something James just pressed, and a
+	# reply to a keypress that a hydrant prompt can swallow is not a reply.
+	if _dev_message_remaining > 0.0:
+		return _dev_message
 	if _water.is_empty() and _water.refill_state == WaterSystem.RefillState.IDLE:
 		return "Out of water. Find a hydrant and hold E to refill"
 	var text: String = Hydrant.prompt_text(hydrant_prompt, _water.get_hookup_progress())

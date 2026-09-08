@@ -18,6 +18,7 @@ var call_number: int = 0
 var total_calls: int = 0
 
 var _candidates: Array[Dictionary] = []
+var _route_from_station: Dictionary = {}
 var _queue: Array[Dictionary] = []
 var _spawner: Node = null
 var _confirmation_remaining: float = 0.0
@@ -34,10 +35,23 @@ func resolve_balance() -> void:
 
 ## spawner is anything with spawn_incident(candidate) -> FireIncident, which in
 ## the game is Main. Injected rather than reached for, so this is testable.
-func setup(spawner: Node, candidates: Array[Dictionary]) -> void:
+##
+## route_from_station maps a candidate id to how far it is from the station
+## along the roads. Handed in rather than measured here because the route is a
+## property of the map and the station, neither of which this node has, and it
+## is the same on every shift: measuring it once at map load beats running
+## Dijkstra from the station at the start of every shift. It may be empty, in
+## which case the first-call rule below simply has nothing to work with and the
+## order is the plain shuffle it always was.
+func setup(
+	spawner: Node,
+	candidates: Array[Dictionary],
+	route_from_station: Dictionary = {}
+) -> void:
 	resolve_balance()
 	_spawner = spawner
 	_candidates = candidates.duplicate()
+	_route_from_station = route_from_station.duplicate()
 
 
 ## Clears everything a previous shift left behind. Signal connections go with
@@ -65,9 +79,65 @@ func start_shift() -> void:
 	while _queue.size() < total_calls:
 		_queue.append_array(_candidates)
 	_queue.resize(total_calls)
+	_queue = order_first_call(
+		_queue, _route_from_station, balance.first_call_min_route
+	)
 
 	_running = true
 	_dispatch_next()
+
+
+## The shuffled queue with a far enough FIRST call brought to the front, and
+## everything else left exactly where the shuffle put it (Milestone 6 Part 3).
+##
+## The first call is the one the player has no warm-up for: it arrives the
+## instant the shift starts, from a standing start at the station, and a
+## candidate a few hundred units up the road is over before the radio line has
+## been read. So the first call must be at least minimum route-units away.
+##
+## Everything after it is untouched. The spacing between candidates is already
+## decided at import time (tools/import_osm.gd keeps them a minimum distance
+## apart) and this is not a second opinion about it: it is one rule about one
+## call.
+##
+## Swaps rather than reorders, so the queue is still the same multiset of calls
+## and a map with three candidates still produces three different ones. Where no
+## candidate at all is far enough, the FARTHEST is used: a rule that could stop
+## a shift starting would be a worse thing than a short first call.
+static func order_first_call(
+	queue: Array[Dictionary], route_from_station: Dictionary, minimum: float
+) -> Array[Dictionary]:
+	if queue.size() < 2 or route_from_station.is_empty() or minimum <= 0.0:
+		return queue
+
+	var ordered: Array[Dictionary] = queue.duplicate()
+	if _route_of(ordered[0], route_from_station) >= minimum:
+		return ordered
+
+	var chosen: int = -1
+	var farthest: int = 0
+	for index in range(ordered.size()):
+		var route: float = _route_of(ordered[index], route_from_station)
+		if chosen < 0 and route >= minimum:
+			chosen = index
+		if route > _route_of(ordered[farthest], route_from_station):
+			farthest = index
+	if chosen < 0:
+		chosen = farthest
+	if chosen == 0:
+		return ordered
+
+	var first: Dictionary = ordered[0]
+	ordered[0] = ordered[chosen]
+	ordered[chosen] = first
+	return ordered
+
+
+## How far a candidate is from the station, or 0 when nothing measured it. An
+## unmeasured candidate reads as near rather than far, so a missing measurement
+## can only cost a swap, never smuggle a doorstep call into first place.
+static func _route_of(candidate: Dictionary, route_from_station: Dictionary) -> float:
+	return float(route_from_station.get(String(candidate.get("id", "")), 0.0))
 
 
 func is_running() -> bool:
