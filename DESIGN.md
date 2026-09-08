@@ -317,7 +317,14 @@ and slip roads get nothing.
 
 ### The camera, and the first call of a shift
 
-The camera is north up and follows the truck, leading it a little at speed.
+The camera is north up and follows the truck, leading it by two seconds of
+travel at speed. The lead is a time and not a distance, because what a driver
+needs is the road they are about to be on, and it is clamped to a third of the
+screen so the engine sits low in the frame rather than being pushed out of it:
+flat out on the default zoom the engine is five sixths of the way down its own
+view with about 630 units of road ahead of it, which is two and a half seconds
+at that speed. At rest it is back in the middle. The change is eased, so lifting
+off the throttle slides the view rather than snapping it.
 **Z cycles three zoom levels**, and all three are kept because all three are
 useful: one street, two streets, and about a third of the map. It began as a
 development key so the right number could be chosen by looking rather than

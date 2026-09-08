@@ -108,6 +108,7 @@ func _run() -> void:
 	await _check_a_windsor_shift_pays_out_with_traffic_on_the_road()
 	await _check_a_whole_shift_is_won_with_nothing_but_the_turret()
 	await _check_the_turret_holds_its_fire_with_a_wall_in_the_way()
+	await _check_the_camera_leads_at_speed_and_centres_at_rest()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -1598,11 +1599,16 @@ func _check_the_zoom_control_holds_its_level() -> void:
 			is_equal_approx(camera.get_zoom_level(), expected),
 			"Z moves the zoom to %.2f (got %.2f)" % [expected, camera.get_zoom_level()]
 		)
+		# The lead is a third of the screen's height at whatever zoom is in use,
+		# so it grows as the view widens. Read against the viewport rather than
+		# against a constant, because a third of the screen is what the rule
+		# actually says (Milestone 10 Part 5).
+		var screen_units: float = camera.get_viewport_rect().size.y / expected
 		_check(
 			camera.get_look_ahead_distance() > 0.0
 				and is_equal_approx(
 					camera.get_look_ahead_distance(),
-					FollowCamera.LOOK_AHEAD_DISTANCE * (FollowCamera.ZOOM / expected)
+					screen_units * FollowCamera.MAX_LEAD_SCREENS
 				),
 			"and the lead scales with it (%.0f)" % camera.get_look_ahead_distance()
 		)
@@ -3061,6 +3067,146 @@ func _check_the_turret_holds_its_fire_with_a_wall_in_the_way() -> void:
 
 	main.queue_free()
 	await physics_frame
+
+
+## Where the engine sits in its own frame, at rest and flat out.
+##
+## Driven due north, so "the lower third" is the literal lower third of the
+## screen rather than a rotation of it: the camera is north up and the lead
+## follows the engine's heading, so an engine driving east sits in the LEFT third
+## by exactly the same rule. The screen position is read from the viewport's own
+## canvas transform, which already accounts for the smoothing and the map-edge
+## clamp, so this measures where the engine is drawn and not where the camera was
+## asked to be.
+func _check_the_camera_leads_at_speed_and_centres_at_rest() -> void:
+	# Elm Grove, whose avenues run exactly north and south. Windsor's streets are
+	# surveyed and none of them is square to the screen, and a check about the
+	# LOWER third of the frame needs a road that actually goes up it.
+	var world: Array = await _make_world(ELM_GROVE_MAP)
+	var main: Node = world[0]
+	var truck: TruckController = world[1]
+	var camera: FollowCamera = main.get_node("Camera")
+
+	var run: Dictionary = _longest_road_going_north(main.get_map_definition())
+	_check(not run.is_empty(), "Elm Grove has a long avenue running due north")
+	if run.is_empty():
+		main.queue_free()
+		await physics_frame
+		return
+
+	# Started at the southern end with room to reach top speed and stop before
+	# the far junction, and away from the map edge so the camera's own limits are
+	# nowhere near binding and what is measured is the lead alone.
+	truck.global_position = Vector2(run["from"]) + Vector2(0.0, -450.0)
+	truck.rotation = -PI / 2.0  # due north
+	truck.velocity = Vector2.ZERO
+	camera.snap_to_target()
+	for _frame in range(PHYSICS_FPS):
+		truck.set_drive_intent(0.0, 0.0, false)
+		await physics_frame
+
+	var view: Rect2 = main.get_viewport().get_visible_rect()
+	var at_rest: Vector2 = main.get_viewport().get_canvas_transform() * truck.global_position
+	_check(
+		absf(at_rest.y - view.size.y * 0.5) < view.size.y * 0.04,
+		"at rest the engine is centred in the frame (%.0f of %.0f)"
+			% [at_rest.y, view.size.y]
+	)
+
+	# Flat out. Long enough to reach top speed AND for the eased lead to finish
+	# arriving, which is the slower of the two: the engine is doing 250 after a
+	# second and a bit, and the lead is within a few units of its target after
+	# about two.
+	for _frame in range(4 * PHYSICS_FPS):
+		truck.set_drive_intent(1.0, 0.0, false)
+		await physics_frame
+
+	var speed: float = truck.get_forward_speed()
+	_check(
+		speed > truck.balance.forward_max_speed - 2.0,
+		"four seconds of throttle reaches top speed (%.0f units/s)" % speed
+	)
+
+	var at_speed: Vector2 = main.get_viewport().get_canvas_transform() * truck.global_position
+	var third: float = view.size.y / 3.0
+	_check(
+		at_speed.y > view.size.y - third and at_speed.y < view.size.y,
+		"and at 250 units/second it is in the LOWER THIRD of the frame"
+			+ " (%.0f, the third starts at %.0f of %.0f)" % [
+				at_speed.y, view.size.y - third, view.size.y
+			]
+	)
+	_check(
+		at_speed.y > at_rest.y + view.size.y * 0.15,
+		"which is well below where it sat at rest (%.0f from %.0f)" % [at_speed.y, at_rest.y]
+	)
+
+	# What the lead buys: the road visible ahead of the engine, in seconds of
+	# travel at the speed it is doing.
+	var ahead_units: float = (at_speed.y / camera.get_zoom_level())
+	_check(
+		ahead_units > 400.0,
+		"with %.0f units of road ahead of it, %.1f seconds at this speed"
+			% [ahead_units, ahead_units / maxf(speed, 1.0)]
+	)
+
+	# Smooth, not snapped, measured on the LEAD ITSELF rather than on where the
+	# engine is drawn. The drawn position also carries the camera's own position
+	# smoothing, which lags a moving target and un-lags a slowing one, and the two
+	# effects very nearly cancel while the engine is coasting down: the first
+	# version of this check measured a total move of six pixels and could not tell
+	# a smooth ease from a jump inside it.
+	var previous: float = camera.get_look_ahead().length()
+	var started_at: float = previous
+	var biggest_step: float = 0.0
+	var settled: float = previous
+	for _frame in range(2 * PHYSICS_FPS):
+		truck.set_drive_intent(0.0, 0.0, false)
+		await physics_frame
+		var now: float = camera.get_look_ahead().length()
+		biggest_step = maxf(biggest_step, absf(now - previous))
+		previous = now
+		settled = now
+	var whole_move: float = absf(settled - started_at)
+	_check(
+		whole_move > 40.0,
+		"lifting off the throttle really does shorten the lead (%.0f units, %.0f to %.0f)"
+			% [whole_move, started_at, settled]
+	)
+	_check(
+		biggest_step < whole_move * 0.1,
+		"and it eases rather than snapping (worst frame %.1f units of %.0f)"
+			% [biggest_step, whole_move]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## The longest WHOLE ROAD that runs due north on this map, as {from, length}.
+## "from" is a point a little way up its southern end, so driving north from
+## there has the whole avenue ahead of it.
+##
+## Read off the map definition rather than off the road graph, because the graph
+## splits every road at every crossing and an avenue that runs the height of the
+## neighbourhood arrives there as four segments of 700.
+func _longest_road_going_north(definition: MapDefinition) -> Dictionary:
+	var best: Dictionary = {}
+	var longest: float = 0.0
+	for road in definition.roads:
+		var points: PackedVector2Array = road["points"]
+		if points.size() < 2:
+			continue
+		var a: Vector2 = points[0]
+		var b: Vector2 = points[points.size() - 1]
+		var span: Vector2 = b - a
+		if absf(span.x) > 2.0 or span.length() <= longest:
+			continue
+		longest = span.length()
+		# Godot's y axis points down, so north is the end with the SMALLER y.
+		var southern: Vector2 = b if b.y > a.y else a
+		best = {"from": southern + Vector2(0.0, -150.0), "length": span.length()}
+	return best
 
 
 ## THE CASE JAMES ACTUALLY PLAYED (Milestone 9, after the first playtest).

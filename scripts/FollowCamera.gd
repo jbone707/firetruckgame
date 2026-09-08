@@ -18,14 +18,32 @@ class_name FollowCamera
 ## like the area he selected rather than have a number guessed for him.
 const ZOOM: float = 0.9
 
-## How far ahead of the truck the camera leads, in world units at full speed, at
-## the DEFAULT zoom. Handoff section 4 asks for reasonable forward visibility.
+## How many SECONDS of travel the camera tries to lead by (Milestone 10 Part 5).
 ##
-## Scaled by the zoom actually in use, because the lead is a fraction of the
-## screen and not a distance in the world: 220 units at 0.9 is a sixth of the
-## way to the edge of the view, and holding it at 220 while the view took in
-## two and a half times as much world would quietly turn the lead off.
-const LOOK_AHEAD_DISTANCE: float = 220.0
+## The lead is a time and not a distance, because what a driver needs is the
+## road they are about to be on: 220 units of lead is a second of warning at 220
+## units/second and four seconds of warning at 55, and the first of those is the
+## one that matters. At the engine's top speed of 250 this asks for 500 units.
+const LOOK_AHEAD_SECONDS: float = 2.0
+
+## How far the lead may push the engine from the middle of the frame, as a
+## fraction of the screen's HEIGHT at the zoom in use.
+##
+## A third, which puts the engine five sixths of the way down the screen at full
+## speed: inside the lower third, with a third of a screen still behind it and
+## no possibility of it reaching the edge. THIS CLAMP IS WHAT ACTUALLY DECIDES
+## THE LEAD at every zoom the game ships, and that is deliberate rather than a
+## disappointment. Two seconds of travel is 500 world units and half the screen
+## at the default zoom is 400, so an uncapped two second lead would put the
+## engine off the bottom of its own view. What the player gets instead is the
+## engine low in the frame with about 670 units of road ahead of it at 0.9, and
+## more at the wider levels, which is between two and a half and four seconds of
+## warning depending on how far out they have chosen to look.
+##
+## In screens rather than world units for the same reason the overscan is: the
+## question is where the engine sits in the FRAME, and the same world distance is
+## a different fraction of the frame at each of the three zoom levels.
+const MAX_LEAD_SCREENS: float = 1.0 / 3.0
 
 ## Impact shake: how far the view is thrown at a full speed crash, world units,
 ## and how long it takes to settle. Small and short on purpose, since the player
@@ -72,11 +90,32 @@ func get_zoom_level() -> float:
 	return _zoom_level
 
 
-## The camera lead at the zoom currently in use. Public because the off-screen
-## call arrow and the physics runner both need to know what the view is doing,
-## and neither should be re-deriving it.
+## The furthest the camera may lead at the zoom currently in use, in world units.
+## Public because the off-screen call arrow and the physics runner both need to
+## know what the view is doing, and neither should be re-deriving it.
 func get_look_ahead_distance() -> float:
-	return LOOK_AHEAD_DISTANCE * (ZOOM / _zoom_level)
+	return _screen_height() * MAX_LEAD_SCREENS
+
+
+## How much world the screen's height takes in at the zoom currently in use.
+func _screen_height() -> float:
+	var view: Vector2 = Vector2(get_viewport_rect().size)
+	if view == Vector2.ZERO:
+		view = Vector2(1280.0, 720.0)
+	return view.y / _zoom_level
+
+
+## What the lead WANTS to be at this speed, before the clamp: two seconds of
+## travel, signed, so reversing pulls the view back the other way.
+func desired_lead_for_speed(forward_speed: float) -> float:
+	return forward_speed * LOOK_AHEAD_SECONDS
+
+
+## The lead the camera is currently applying, in world units. Public so a check
+## can watch it ease rather than having to infer smoothness from where the engine
+## is drawn, which also carries the camera's own position smoothing.
+func get_look_ahead() -> Vector2:
+	return _look_ahead
 
 
 ## Clamps the view to the playable extent, plus an overscan (Milestone 8
@@ -136,13 +175,20 @@ func _physics_process(delta: float) -> void:
 	var desired_look_ahead: Vector2 = Vector2.ZERO
 	if target is TruckController:
 		var truck: TruckController = target
-		var speed_ratio: float = clampf(
-			truck.get_forward_speed() / truck.balance.forward_max_speed, -1.0, 1.0
+		# Two seconds of travel, clamped so the engine cannot be pushed out of
+		# the lower third of its own view. The clamp is what binds at every
+		# shipped zoom; see MAX_LEAD_SCREENS.
+		var most: float = get_look_ahead_distance()
+		var lead: float = clampf(
+			desired_lead_for_speed(truck.get_forward_speed()), -most, most
 		)
-		desired_look_ahead = truck.get_forward() * get_look_ahead_distance() * speed_ratio
+		desired_look_ahead = truck.get_forward() * lead
 
-	# Ease the lead in rather than snapping it, so a hard turn does not whip
-	# the view across the screen.
+	# Ease the lead in rather than snapping it, so a hard turn does not whip the
+	# view across the screen and lifting off the throttle does not jerk it back.
+	# The rate is the whole of "smooth, no snapping at throttle changes": at
+	# three per second the view takes about a second to answer a change of speed,
+	# which is slower than the engine can change its mind.
 	_look_ahead = _look_ahead.lerp(desired_look_ahead, clampf(delta * 3.0, 0.0, 1.0))
 
 	var offset_shake: Vector2 = Vector2.ZERO
