@@ -21,6 +21,24 @@ const PHYSICS_FPS: int = 60
 ## is the reason the geometry was rewritten.
 const WINDSOR_MAP: String = "res://resources/windsor_shadetree.tres"
 
+## The fictional map, named here rather than left to the default, because the
+## default is whichever map the PLAYER last chose (Milestone 6 Part 1). Main
+## reads the real save in _ready and builds that map before this runner gets a
+## chance to redirect it, so a suite that said nothing about which map it
+## wanted was quietly testing James's last game. On a save naming Windsor,
+## eight of these checks failed on an unchanged tree, including the Elm Grove
+## fence at 574, which is a number Windsor has no reason to produce.
+const ELM_GROVE_MAP: String = "res://resources/neighbourhood.tres"
+
+## The turn off Hembree Lane. The run-up is long enough to be at speed by the
+## junction, the run down the side street long enough that the truck is
+## properly into it rather than sitting in its mouth, and the arrival radius is
+## two truck lengths, so a truck that gets there without lining up neatly still
+## counts as having got there.
+const APPROACH_RUN_UP: float = 700.0
+const SIDE_STREET_RUN: float = 900.0
+const ARRIVAL_RADIUS: float = 180.0
+
 ## Where a world built by this runner writes its save, so the suite never
 ## touches the player's own.
 const TEST_SAVE_PATH: String = "user://physics_runner_save.json"
@@ -46,6 +64,8 @@ func _run() -> void:
 	await _check_an_empty_lot_stops_the_truck()
 	await _check_a_windsor_road_is_fenced_at_both_sides()
 	await _check_a_whole_shift_pays_out_on_the_windsor_map()
+	await _check_a_windsor_shift_starts_whole()
+	await _check_the_truck_turns_off_hembree_lane_into_a_side_street()
 	await _check_the_menus_walk_the_way_a_player_walks_them()
 	await _check_every_approach_to_a_hydrant_hooks_up()
 	await _check_the_narrowest_road_the_truck_can_turn_in()
@@ -82,16 +102,20 @@ func _check(condition: bool, message: String) -> void:
 ## without this the suite quietly paid the player 350 credits every time it ran
 ## and, once maps became choosable, would have changed which map their game
 ## opened on. A test that alters the thing it is testing around is not a test.
-func _make_world(map_path: String = "") -> Array:
+##
+## Redirecting the save was only half of it. Main has already READ the player's
+## save by the time the first physics frame lands, so the map it built is the
+## one they last played. Every world is therefore told which map it wants.
+func _make_world(map_path: String = ELM_GROVE_MAP) -> Array:
 	var main: Node = load("res://scenes/Main.tscn").instantiate()
 	root.add_child(main)
 	await physics_frame
 	main.set_physics_process(false)
 	main._save.use_paths(TEST_SAVE_PATH, TEST_TEMP_PATH)
 	main._save.reset_to_defaults()
-	if map_path != "":
-		main.load_map(map_path)
-		await physics_frame
+	# Always stated, never inherited: see ELM_GROVE_MAP.
+	main.load_map(map_path)
+	await physics_frame
 	return [main, main.get_node("Truck")]
 
 
@@ -719,6 +743,179 @@ func _check_a_whole_shift_pays_out_on_the_windsor_map() -> void:
 
 	main.queue_free()
 	await physics_frame
+
+
+## A shift started on Windsor the way the menu starts one, checked on its very
+## first physics frame (Milestone 6 Part 0).
+##
+## James finished the first call of a Windsor shift with the condition bar at 10
+## and asked the fair question: did he crash, or does the new menu path start
+## him broken? Nothing in reset_for_new_shift looked wrong, and reading it again
+## would not have answered him. This does.
+func _check_a_windsor_shift_starts_whole() -> void:
+	var world: Array = await _make_world(WINDSOR_MAP)
+	var main: Node = world[0]
+	var truck: Node = world[1]
+	var water: Node = main._water
+
+	# The menu path exactly: choose the map, then press Start shift.
+	main._on_map_chosen("windsor_shadetree_v1")
+	await physics_frame
+	main._on_start_shift_pressed()
+	await physics_frame
+
+	_check(
+		is_equal_approx(truck.condition, truck.max_condition),
+		"a Windsor shift begun from the menu starts on full condition (%.1f of %.1f)"
+			% [truck.condition, truck.max_condition]
+	)
+	_check(
+		is_equal_approx(water.water_remaining, water.tank_capacity),
+		"and a full tank (%.1f of %.1f)" % [water.water_remaining, water.tank_capacity]
+	)
+
+	# And still whole ten seconds later with nothing touched, so a spawn sitting
+	# inside something solid cannot drain the bar before the player moves.
+	var damage_events: Array[float] = []
+	truck.truck_damaged.connect(
+		func(amount: float, _speed: float) -> void: damage_events.append(amount)
+	)
+	for _frame in range(10 * PHYSICS_FPS):
+		truck.set_drive_intent(0.0, 0.0, false)
+		await physics_frame
+	_check(
+		damage_events.is_empty() and is_equal_approx(truck.condition, truck.max_condition),
+		"and is still on full condition after ten seconds parked at the station"
+			+ " (%.1f, %d damage event(s))" % [truck.condition, damage_events.size()]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## Driving off Hembree Lane into the side street that joins it, through the
+## junction, at speed (Milestone 6 Part 1).
+##
+## Honest about what this proves: the wedges Milestone 5 left across these
+## mouths were drawn, not solid, so this check would have passed while the map
+## looked shut. It is here because a junction the truck cannot drive through is
+## the defect James reported, and nothing else in this suite ever turns one road
+## into another. test_map_geometry.gd is the check that catches the drawing.
+func _check_the_truck_turns_off_hembree_lane_into_a_side_street() -> void:
+	var world: Array = await _make_world(WINDSOR_MAP)
+	var main: Node = world[0]
+	var truck: Node = world[1]
+	var graph: RoadGraph = main._map_builder.get_road_graph()
+	var map: MapDefinition = main.get_map_definition()
+
+	var junction: Dictionary = _first_side_street_off(graph, map, "Hembree Lane")
+	_check(
+		not junction.is_empty(),
+		"Hembree Lane has a side street to turn into near the station"
+	)
+	if junction.is_empty():
+		main.queue_free()
+		await physics_frame
+		return
+
+	var node: Vector2 = junction["node"]
+	var approach: Vector2 = junction["approach"]
+	var target: Vector2 = junction["target"]
+
+	var damage_events: Array[float] = []
+	truck.truck_damaged.connect(
+		func(amount: float, _speed: float) -> void: damage_events.append(amount)
+	)
+
+	truck.global_position = approach
+	truck.rotation = (node - approach).angle()
+	truck.velocity = Vector2.ZERO
+
+	# Steer at the far point down the side street and hold the throttle down. A
+	# junction drawn shut, or a wedge solid enough to stop the truck, shows up
+	# as a truck that never arrives.
+	var closest: float = INF
+	for _frame in range(12 * PHYSICS_FPS):
+		var error: float = wrapf(
+			(target - truck.global_position).angle() - truck.rotation, -PI, PI
+		)
+		truck.set_drive_intent(1.0, clampf(error * 2.0, -1.0, 1.0), false)
+		await physics_frame
+		closest = minf(closest, truck.global_position.distance_to(target))
+		# Stopped at the target rather than driven on through it: the question is
+		# whether the junction can be taken, and holding the throttle down past a
+		# point 268 units into a side street only asks what is at the far end of
+		# the side street.
+		if closest <= ARRIVAL_RADIUS:
+			break
+
+	_check(
+		closest <= ARRIVAL_RADIUS,
+		"the truck drives off Hembree Lane at %s, through the junction and into %s"
+			% [str(approach), junction["name"]]
+			+ " (closest %.0f to a point %.0f down it, allowed %.0f)"
+			% [closest, node.distance_to(target), ARRIVAL_RADIUS]
+	)
+	_check(
+		damage_events.is_empty(),
+		"and takes nothing off the condition bar doing it (%d damage event(s))"
+			% damage_events.size()
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## The junction on the named road nearest the station where a differently named
+## road joins it, with a point to start from on the named road and a point to
+## aim at down the side street.
+func _first_side_street_off(
+	graph: RoadGraph, map: MapDefinition, road_name: String
+) -> Dictionary:
+	var station: Vector2 = map.station_spawn_position
+	var best: Dictionary = {}
+	var best_distance: float = INF
+
+	for node in graph.junction_nodes():
+		var main_edge: int = -1
+		var side_edge: int = -1
+		for edge_index in graph.incident_edges[node]:
+			var here: String = String(
+				map.roads[int(graph.edges[int(edge_index)]["road_index"])].get("name", "")
+			)
+			if here == road_name:
+				if main_edge < 0 or _longer(graph, int(edge_index), main_edge):
+					main_edge = int(edge_index)
+			elif side_edge < 0 or _longer(graph, int(edge_index), side_edge):
+				side_edge = int(edge_index)
+		if main_edge < 0 or side_edge < 0:
+			continue
+
+		var distance: float = graph.positions[node].distance_to(station)
+		if distance >= best_distance:
+			continue
+		best_distance = distance
+		best = {
+			"node": graph.positions[node],
+			"approach": _along(graph, node, main_edge, APPROACH_RUN_UP),
+			"target": _along(graph, node, side_edge, SIDE_STREET_RUN),
+			"name": String(map.roads[int(graph.edges[side_edge]["road_index"])].get("name", "")),
+		}
+	return best
+
+
+func _longer(graph: RoadGraph, edge_index: int, than: int) -> bool:
+	return float(graph.edges[edge_index]["length"]) > float(graph.edges[than]["length"])
+
+
+## A point on one arm's centreline, at most "distance" from the node and never
+## past the arm's far end.
+func _along(graph: RoadGraph, node: int, edge_index: int, distance: float) -> Vector2:
+	var edge: Dictionary = graph.edges[edge_index]
+	var other: int = int(edge["b"]) if int(edge["a"]) == node else int(edge["a"])
+	var here: Vector2 = graph.positions[node]
+	var direction: Vector2 = (graph.positions[other] - here).normalized()
+	return here + direction * minf(distance, float(edge["length"]) * 0.85)
 
 
 ## Pulling up to a hydrant, three ways, in the real scene against the real map.

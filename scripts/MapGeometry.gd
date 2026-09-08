@@ -25,11 +25,25 @@ class_name MapGeometry
 ## Why subtraction rather than a union of the roads: Godot's Geometry2D merges
 ## two polygons at a time, and a road network that encloses a block unions into
 ## a ring, which is a polygon with a hole, which the next merge cannot take as
-## input. Clipping the map rectangle by one slab at a time never builds a ring:
-## as long as the road network reaches the edge of the map, every piece it
-## leaves behind is a simple polygon. MapValidator checks exactly that on every
-## map, so a map that broke the assumption would fail the checker rather than
-## quietly draw wrongly.
+## input.
+##
+## Subtraction has the same hazard one step further in, and Milestone 5 missed
+## it (Milestone 6 Part 1). Clipping the map rectangle by one slab at a time
+## DOES build rings on a real map: at 10 of Windsor's 189 cuts the cut enclosed
+## part of what was left, Godot handed the enclosure back as a separate
+## clockwise polygon, and the next cut took that hole as its subject and
+## treated a void as solid ground. The region that came out had no holes left
+## in it, so the no-holes rule saw nothing wrong, but eight of its 25 pieces
+## were lying inside the road: two whole road segments and six wedges across
+## the mouths of side streets, every one of them drawn with a kerb line around
+## it. That is what made Windsor read as one long road with its turnings
+## painted shut.
+##
+## So no hole is ever produced now: _subtract splits its subject in half
+## through any enclosure the cut would make and cuts the halves instead, which
+## is the same region written as simple polygons. MapValidator still asks every
+## map whether a hole survived, as a check on this rather than as the thing
+## keeping it true.
 
 ## Lot pieces smaller than this are dropped. Near-parallel roads leave slivers a
 ## few units across between them, and fencing one off would put an invisible
@@ -41,6 +55,19 @@ const MIN_LOT_AREA: float = 400.0
 ## map edge rather than as a kerb or a fence. The wall along the boundary is
 ## neither, and drawing one there would ring the whole map in a line.
 const BOUNDARY_EPSILON: float = 1.0
+
+## How many times one cut may split its subject in half to avoid leaving a
+## hole. Each split halves the piece around the hole, so the depth needed is
+## the number of separate enclosures one cutter can make in one piece, which
+## on these maps is one. Eight is far past anything real and exists only so a
+## map that somehow defeated the split fails the validator rather than
+## recursing forever.
+const MAX_SPLIT_DEPTH: int = 8
+
+## How far past the piece the splitting half-planes reach, world units. It only
+## has to be more than nothing, so the cut runs clean through the piece rather
+## than stopping on its boundary.
+const SPLIT_MARGIN: float = 16.0
 
 
 ## Every road segment as an oriented slab, kerb to kerb, plus one convex fill at
@@ -232,9 +259,87 @@ static func _clip_region(
 ) -> Array[PackedVector2Array]:
 	var result: Array[PackedVector2Array] = []
 	for piece in region:
-		for clipped in Geometry2D.clip_polygons(piece, cutter):
-			result.append(clipped)
+		for kept in _subtract(piece, cutter, 0):
+			result.append(kept)
 	return result
+
+
+## One piece minus one cutter, never handing back a hole (Milestone 6 Part 1).
+##
+## This is the whole junction fix. Godot returns a hole as a separate polygon
+## wound clockwise, and the caller then hands that hole back as the SUBJECT of
+## the next cut, which treats a void as if it were solid ground. On Windsor
+## that happened at 10 of the 189 cuts, and what came back out was eight pieces
+## of "land" lying inside the road: two of them whole road segments, the rest
+## wedges across the mouths of side streets. The final region had no holes left
+## in it, so the validator's no-holes rule saw nothing wrong.
+##
+## The cure is to never produce the hole. A hole means the cutter enclosed part
+## of the piece; splitting the piece along a line through the hole leaves that
+## area touching the boundary of both halves instead of enclosed by either, so
+## cutting each half separately gives the same region as one simple polygons.
+## Union of the halves is the union of the whole, so this is exact, not an
+## approximation.
+static func _subtract(
+	piece: PackedVector2Array, cutter: PackedVector2Array, depth: int
+) -> Array[PackedVector2Array]:
+	var clipped: Array[PackedVector2Array] = Geometry2D.clip_polygons(piece, cutter)
+	var hole: int = -1
+	for i in range(clipped.size()):
+		if Geometry2D.is_polygon_clockwise(clipped[i]):
+			hole = i
+			break
+	if hole < 0 or depth >= MAX_SPLIT_DEPTH:
+		return clipped
+
+	var halves: Array[PackedVector2Array] = _split_across(piece, clipped[hole])
+	if halves.size() < 2:
+		return clipped
+
+	var result: Array[PackedVector2Array] = []
+	for half in halves:
+		for kept in _subtract(half, cutter, depth + 1):
+			result.append(kept)
+	return result
+
+
+## The piece cut in two by a straight line through the middle of the hole, on
+## whichever axis the hole is longer, so the line crosses it rather than
+## grazing an end.
+static func _split_across(
+	piece: PackedVector2Array, hole: PackedVector2Array
+) -> Array[PackedVector2Array]:
+	var box: Rect2 = _bounds_of(hole)
+	var wide: Rect2 = _bounds_of(piece).grow(SPLIT_MARGIN)
+	var halves: Array[PackedVector2Array] = []
+
+	var first: Rect2
+	var second: Rect2
+	if box.size.x >= box.size.y:
+		var cut: float = box.position.x + box.size.x / 2.0
+		first = Rect2(wide.position, Vector2(cut - wide.position.x, wide.size.y))
+		second = Rect2(Vector2(cut, wide.position.y), Vector2(wide.end.x - cut, wide.size.y))
+	else:
+		var cut: float = box.position.y + box.size.y / 2.0
+		first = Rect2(wide.position, Vector2(wide.size.x, cut - wide.position.y))
+		second = Rect2(Vector2(wide.position.x, cut), Vector2(wide.size.x, wide.end.y - cut))
+
+	for half in [first, second]:
+		if half.size.x <= 0.0 or half.size.y <= 0.0:
+			continue
+		for part in Geometry2D.intersect_polygons(piece, rect_polygon(half)):
+			if not Geometry2D.is_polygon_clockwise(part):
+				halves.append(part)
+	return halves
+
+
+static func _bounds_of(polygon: PackedVector2Array) -> Rect2:
+	if polygon.is_empty():
+		return Rect2()
+	var box := Rect2(polygon[0], Vector2.ZERO)
+	for point in polygon:
+		box = box.expand(point)
+	return box
 
 
 static func _cleaned(
