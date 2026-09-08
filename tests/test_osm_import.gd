@@ -12,6 +12,8 @@ extends "res://tests/test_case.gd"
 ## comparing the file hash; the command is in README.md.
 
 const MAP_PATH: String = "res://resources/windsor_shadetree.tres"
+const WINDSOR_MAP: String = MAP_PATH
+const FICTIONAL_MAP: String = "res://resources/neighbourhood.tres"
 
 ## How far a road's stated endpoint may sit from the graph node it welded onto
 ## before something has gone wrong. RoadGraph welds within half a unit, so a
@@ -257,3 +259,100 @@ func test_every_real_building_says_whether_it_was_moved_off_the_road() -> void:
 		adjusted <= 10,
 		"at most ten real footprints were set back off a road (%d were)" % adjusted
 	)
+
+
+## No house is drawn on top of another, on either map (Milestone 8 Part 1).
+##
+## Windsor shipped with twelve overlapping pairs and nothing said so. Every one
+## was a synthetic frontage lot laid over real OSM footprints: the importer
+## decided a stretch of frontage was empty by testing a SINGLE point at the
+## middle of the band, so a house set back further or nearer than that one point
+## was invisible to it, and a full-depth lot went down on top of the house. On
+## screen that was three roofs stacked on one another.
+##
+## Asked here as well as in MapValidator because the validator runs from a tool
+## James has to remember to run, and this runs on every commit. The classes are
+## reported separately: a synthetic lot on a real house is this defect, while
+## two real footprints overlapping would be a different one, in the data rather
+## than in the generator.
+func test_no_two_building_footprints_overlap() -> void:
+	for path in [FICTIONAL_MAP, WINDSOR_MAP]:
+		var map: MapDefinition = load(path) as MapDefinition
+		assert_true(map != null, "%s loads as a MapDefinition" % path)
+		if map == null:
+			continue
+
+		var boxes: Array[Rect2] = []
+		for building in map.buildings:
+			boxes.append(_bounds_of(building["polygon"]))
+
+		var mixed: Array[String] = []
+		var both_real: Array[String] = []
+		var both_synthetic: Array[String] = []
+		for i in range(map.buildings.size()):
+			for j in range(i + 1, map.buildings.size()):
+				if not boxes[i].intersects(boxes[j]):
+					continue
+				var shared: float = 0.0
+				for piece in Geometry2D.intersect_polygons(
+					map.buildings[i]["polygon"], map.buildings[j]["polygon"]
+				):
+					shared += MapGeometry.polygon_area(piece)
+				if shared <= MapValidator.BUILDING_OVERLAP_EPSILON_AREA:
+					continue
+				var pair: String = "%s/%s by %.0f" % [
+					String(map.buildings[i]["id"]), String(map.buildings[j]["id"]), shared]
+				var a: String = String(map.buildings[i].get("source", "?"))
+				var b: String = String(map.buildings[j].get("source", "?"))
+				if a != b:
+					mixed.append(pair)
+				elif a == "osm":
+					both_real.append(pair)
+				else:
+					both_synthetic.append(pair)
+
+		assert_eq(
+			mixed.size(), 0,
+			"%s: no synthetic lot sits on a real footprint (%s)"
+				% [map.map_id, mixed.slice(0, 3)]
+		)
+		assert_eq(
+			both_real.size(), 0,
+			"%s: no two real footprints overlap (%s)" % [map.map_id, both_real.slice(0, 3)]
+		)
+		assert_eq(
+			both_synthetic.size(), 0,
+			"%s: no two synthetic lots overlap (%s)"
+				% [map.map_id, both_synthetic.slice(0, 3)]
+		)
+
+
+## Every synthetic lot lies wholly inside the world. Seven of Windsor's straddled
+## the left wall, half of each outside the map, for the same single-point reason:
+## the importer asked whether the middle of the band was in bounds, not whether
+## the lot was.
+func test_every_synthetic_lot_lies_inside_the_world() -> void:
+	for path in [FICTIONAL_MAP, WINDSOR_MAP]:
+		var map: MapDefinition = load(path) as MapDefinition
+		if map == null:
+			continue
+		var outside: Array[String] = []
+		for building in map.buildings:
+			for point in building["polygon"]:
+				if not map.world_bounds.has_point(point):
+					outside.append(String(building["id"]))
+					break
+		assert_eq(
+			outside.size(), 0,
+			"%s: every footprint is inside the world (%s)"
+				% [map.map_id, outside.slice(0, 5)]
+		)
+
+
+static func _bounds_of(polygon: PackedVector2Array) -> Rect2:
+	if polygon.is_empty():
+		return Rect2()
+	var box := Rect2(polygon[0], Vector2.ZERO)
+	for point in polygon:
+		box = box.expand(point)
+	return box

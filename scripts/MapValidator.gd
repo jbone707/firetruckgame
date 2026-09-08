@@ -64,6 +64,7 @@ static func validate(definition: MapDefinition) -> Array[Dictionary]:
 		_check_roads_are_wide_enough_to_turn_in(definition),
 		_check_roads_only_overlap_at_junctions(definition, graph),
 		_check_buildings_are_off_the_road(definition, graph),
+		_check_no_two_buildings_overlap(definition),
 		_check_the_land_between_the_roads_is_buildable(definition, graph),
 	]
 
@@ -77,6 +78,71 @@ static func passed(results: Array[Dictionary]) -> bool:
 
 static func _result(rule: String, passed_value: bool, detail: String) -> Dictionary:
 	return {"rule": rule, "passed": passed_value, "detail": detail}
+
+
+## No two building polygons may share more than a hairline of ground
+## (Milestone 8 Part 1). Square world units; a fifth of a square metre at 14
+## units per metre. Clipper returns slivers where two terraced houses share a
+## wall, and a sliver is not a house drawn on a house.
+const BUILDING_OVERLAP_EPSILON_AREA: float = 4.0
+
+
+## Rule 6. No two buildings overlap.
+##
+## Windsor shipped with twelve overlapping pairs and nothing said so. Every one
+## of them was a synthetic frontage lot laid over real OSM houses, because the
+## importer decided a stretch of frontage was empty by testing a SINGLE point at
+## the middle of the band: a house set back further or nearer than that point
+## was invisible to it. On screen it was three roofs stacked on one another,
+## which is what James saw and called "houses on top of houses".
+##
+## The importer no longer does that. This rule is here so that it cannot start
+## again quietly, on this extract or the next one: it asks the finished map the
+## question directly, rather than trusting the generator that produced it.
+static func _check_no_two_buildings_overlap(definition: MapDefinition) -> Dictionary:
+	const RULE: String = "no two building polygons overlap"
+
+	var boxes: Array[Rect2] = []
+	for building in definition.buildings:
+		boxes.append(_polygon_bounds(building["polygon"]))
+
+	var offenders: Array[String] = []
+	var worst: float = 0.0
+	for i in range(definition.buildings.size()):
+		for j in range(i + 1, definition.buildings.size()):
+			if not boxes[i].intersects(boxes[j]):
+				continue
+			var shared: float = 0.0
+			for piece in Geometry2D.intersect_polygons(
+				definition.buildings[i]["polygon"], definition.buildings[j]["polygon"]
+			):
+				shared += MapGeometry.polygon_area(piece)
+			if shared <= BUILDING_OVERLAP_EPSILON_AREA:
+				continue
+			worst = maxf(worst, shared)
+			if offenders.size() < 5:
+				offenders.append("%s over %s by %.0f" % [
+					String(definition.buildings[i]["id"]),
+					String(definition.buildings[j]["id"]),
+					shared,
+				])
+
+	if offenders.is_empty():
+		return _result(
+			RULE, true, "%d building(s), no pair sharing ground" % definition.buildings.size()
+		)
+	return _result(RULE, false, "overlapping pair(s), worst %.0f square units: %s" % [
+		worst, ", ".join(offenders)
+	])
+
+
+static func _polygon_bounds(polygon: PackedVector2Array) -> Rect2:
+	if polygon.is_empty():
+		return Rect2()
+	var box := Rect2(polygon[0], Vector2.ZERO)
+	for point in polygon:
+		box = box.expand(point)
+	return box
 
 
 ## Rule 1. Every piece of road reachable from the station, in one graph, with

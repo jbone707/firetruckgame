@@ -140,6 +140,21 @@ const HYDRANT_STANDOFF: float = 0.0
 ## Synthetic lot fill. Frontage is sampled every SAMPLE_METRES along each side
 ## of each road; a run of at least MIN_RUN_METRES with no real footprint inside
 ## the band from the kerb out to LOT_DEPTH_METRES gets one synthetic lot.
+## How many points across the frontage band's DEPTH are tested before that
+## stretch counts as empty. One, the original, misses any house that does not
+## happen to contain the band's midline (Milestone 8 Part 1).
+const BAND_SAMPLES: int = 5
+
+## Clear ground a synthetic lot must leave around itself, world units, against
+## real footprints and against other lots. 20 units is about a fifth of a truck
+## length: enough that two roofs never share an edge and read as one building.
+const LOT_CLEARANCE_UNITS: float = 20.0
+
+## Overlap, in square world units, below which two footprints count as merely
+## touching. Clipper returns hairline slivers where two terraced houses share a
+## wall, and a sliver is not a house drawn on a house.
+const FOOTPRINT_OVERLAP_EPSILON_AREA: float = 4.0
+
 const FRONTAGE_SAMPLE_METRES: float = 5.0
 const FRONTAGE_MIN_RUN_METRES: float = 30.0
 const FRONTAGE_SETBACK_METRES: float = 6.0
@@ -761,9 +776,18 @@ func _import_buildings(
 	var on_road: int = 0
 	var adjusted_count: int = 0
 
+	var parts: int = 0
 	for way in ways:
 		var tags: Dictionary = way.get("tags", {})
 		if not tags.has("building"):
+			continue
+		# A building:part is a piece OF a building, mapped so that a block of
+		# flats can carry different heights per wing. Drawn as a footprint in its
+		# own right it is a second roof laid on top of the first. This extract
+		# has none, so the rule changes nothing today and is here so the next
+		# extract cannot introduce the defect silently.
+		if tags.has("building:part"):
+			parts += 1
 			continue
 		var polygon: PackedVector2Array = _way_polygon(way)
 		if polygon.size() < 3:
@@ -817,9 +841,11 @@ func _import_buildings(
 			"adjusted_for_road": adjusted,
 		})
 
-	_note("buildings: %d imported, %d set back off a road slab, %d dropped for crossing the box edge, %d dropped for overlapping a road slab" % [
-		buildings.size(), adjusted_count, clipped_out, on_road
+	_note("buildings: %d imported, %d set back off a road slab, %d dropped for crossing the box edge, %d dropped for overlapping a road slab, %d building:part(s) skipped" % [
+		buildings.size(), adjusted_count, clipped_out, on_road, parts
 	])
+
+	buildings = _drop_overlapping_footprints(buildings)
 
 	var synthetic: Array[Dictionary] = _synthesize_lots(definition, buildings, graph)
 	buildings.append_array(synthetic)
@@ -888,11 +914,82 @@ static func oriented_rect(a: Vector2, b: Vector2, width: float) -> PackedVector2
 	return PackedVector2Array([a + side, b + side, b - side, a - side])
 
 
+## Two real footprints that overlap are a house drawn on top of a house
+## (Milestone 8 Part 1). One wholly inside another is a courtyard, an outbuilding
+## mapped twice, or a part mapped as a whole; a partial overlap is two surveys
+## disagreeing. Either way only one roof can be drawn there, so the larger
+## footprint wins and the smaller is dropped, by name, in the notes.
+##
+## This extract has no such pair, so on today's data this is a no-op and is
+## honest about it. It exists because the rule "no two buildings overlap" is
+## about to become a validator rule, and a rule the importer cannot satisfy
+## would make every future extract a manual repair job.
+func _drop_overlapping_footprints(buildings: Array[Dictionary]) -> Array[Dictionary]:
+	var areas: Array[float] = []
+	var boxes: Array[Rect2] = []
+	for building in buildings:
+		areas.append(MapGeometry.polygon_area(building["polygon"]))
+		boxes.append(_polygon_bounds(building["polygon"]))
+
+	var dropped: Dictionary = {}
+	for i in range(buildings.size()):
+		if dropped.has(i):
+			continue
+		for j in range(i + 1, buildings.size()):
+			if dropped.has(j) or not boxes[i].intersects(boxes[j]):
+				continue
+			var shared: float = 0.0
+			for piece in Geometry2D.intersect_polygons(
+				buildings[i]["polygon"], buildings[j]["polygon"]
+			):
+				shared += MapGeometry.polygon_area(piece)
+			if shared <= FOOTPRINT_OVERLAP_EPSILON_AREA:
+				continue
+			# The smaller goes, whether it was wholly inside or only partly over.
+			var loser: int = j if areas[j] <= areas[i] else i
+			dropped[loser] = true
+			_note("buildings: dropped %s, overlapping %s by %.0f square units" % [
+				String(buildings[loser]["id"]),
+				String(buildings[j if loser == i else i]["id"]),
+				shared,
+			])
+			if loser == i:
+				break
+
+	if dropped.is_empty():
+		_note("buildings: no two real footprints overlap")
+		return buildings
+
+	var kept: Array[Dictionary] = []
+	for i in range(buildings.size()):
+		if not dropped.has(i):
+			kept.append(buildings[i])
+	_note("buildings: %d real footprint(s) dropped for overlapping another" % dropped.size())
+	return kept
+
+
 ## Fills empty road frontage with plain rectangular lots, so a block with no
 ## OSM footprints along it is not just open ground the player drives past.
 ##
 ## Every lot produced is marked synthetic. Nothing here pretends to be a
 ## building that exists.
+##
+## A lot may not touch anything (Milestone 8 Part 1). The first version asked
+## whether ONE point, the centre of the frontage band, was inside a real
+## footprint, and laid a full-depth lot wherever that point was clear. A house
+## set back further or nearer than that single sample was invisible to it, so
+## twelve of Windsor's synthetic lots were laid straight over real houses: every
+## overlapping pair on the map was one synthetic lot on one or more real
+## footprints, which is what "houses on top of houses" was. The same single
+## point decided whether the lot was inside the world, which is why seven lots
+## straddled the left wall with half of each outside the map.
+##
+## So the band is now sampled across its whole depth, and, whatever the sampling
+## concludes, every finished lot is tested as a POLYGON against the real
+## footprints, the lots already accepted, the road slabs and the world bounds,
+## with a margin. Anything that cannot meet that is dropped rather than moved:
+## a lot is invented ground and costs nothing to give up, while moving one would
+## put it where no frontage was measured.
 func _synthesize_lots(
 	definition: MapDefinition, real_buildings: Array[Dictionary], graph: RoadGraph
 ) -> Array[Dictionary]:
@@ -919,14 +1016,24 @@ func _synthesize_lots(
 			var run_start: float = -1.0
 			var travelled: float = 0.0
 			while travelled <= length:
-				var band_centre: Vector2 = (
-					a + direction * travelled + side * (half_width + setback + depth * 0.5)
-				)
-				var occupied: bool = (
-					not _world_bounds.has_point(band_centre)
-					or _point_in_any(band_centre, real_buildings)
-					or _point_in_any_lot(band_centre, lots)
-				)
+				# Sampled ACROSS the band, not once down the middle of it: a
+				# house set back further or nearer than a single mid-band point
+				# is invisible to one sample, and that is what laid lots over
+				# real houses.
+				var occupied: bool = false
+				for step in range(BAND_SAMPLES):
+					var into: float = (
+						half_width + setback
+						+ depth * (float(step) + 0.5) / float(BAND_SAMPLES)
+					)
+					var probe: Vector2 = a + direction * travelled + side * into
+					if (
+						not _world_bounds.has_point(probe)
+						or _point_in_any(probe, real_buildings)
+						or _point_in_any_lot(probe, lots)
+					):
+						occupied = true
+						break
 				if occupied:
 					if run_start >= 0.0 and travelled - run_start >= min_run:
 						lots.append_array(_lots_along(
@@ -953,15 +1060,66 @@ func _synthesize_lots(
 	# Ids keep the numbers they were given, so a dropped lot leaves a gap rather
 	# than renaming its neighbours.
 	var clear: Array[Dictionary] = []
+	var on_road: int = 0
+	var on_building: int = 0
+	var on_lot: int = 0
+	var outside: int = 0
 	for lot in lots:
-		if _overlaps_any_road(lot["polygon"], definition, graph):
+		var polygon: PackedVector2Array = lot["polygon"]
+		if not _polygon_inside_world(polygon):
+			outside += 1
+			continue
+		if _overlaps_any_road(polygon, definition, graph):
+			on_road += 1
+			continue
+		# Grown by the margin, so a lot that merely touches a house or another
+		# lot is dropped too: two roofs sharing an edge read as one L-shaped
+		# building, which is a different lie from the one being fixed.
+		var grown: PackedVector2Array = _grown_polygon(polygon, LOT_CLEARANCE_UNITS)
+		if _polygon_hits_any(grown, real_buildings):
+			on_building += 1
+			continue
+		if _polygon_hits_any(grown, clear):
+			on_lot += 1
 			continue
 		clear.append(lot)
-	if clear.size() < lots.size():
-		_note("buildings: %d synthetic lot(s) dropped for landing on a road" % [
-			lots.size() - clear.size(),
-		])
+	_note(
+		"buildings: %d synthetic lot(s) proposed, %d kept; dropped %d on a road, %d on a real footprint, %d on another lot, %d outside the world"
+			% [lots.size(), clear.size(), on_road, on_building, on_lot, outside]
+	)
 	return clear
+
+
+func _polygon_inside_world(polygon: PackedVector2Array) -> bool:
+	for point in polygon:
+		if not _world_bounds.has_point(point):
+			return false
+	return true
+
+
+static func _grown_polygon(polygon: PackedVector2Array, by: float) -> PackedVector2Array:
+	var grown: Array[PackedVector2Array] = Geometry2D.offset_polygon(
+		polygon, by, Geometry2D.JOIN_SQUARE
+	)
+	return grown[0] if grown.size() > 0 else polygon
+
+
+static func _polygon_hits_any(
+	polygon: PackedVector2Array, others: Array[Dictionary]
+) -> bool:
+	for other in others:
+		if not Geometry2D.intersect_polygons(polygon, other["polygon"]).is_empty():
+			return true
+	return false
+
+
+static func _polygon_bounds(polygon: PackedVector2Array) -> Rect2:
+	if polygon.is_empty():
+		return Rect2()
+	var box := Rect2(polygon[0], Vector2.ZERO)
+	for point in polygon:
+		box = box.expand(point)
+	return box
 
 
 func _lots_along(
