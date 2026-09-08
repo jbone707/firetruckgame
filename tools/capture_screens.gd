@@ -55,7 +55,11 @@ const CLOSEUP_ZOOM: float = 2.2
 ## zoom that still fills the frame with its own subject.
 const JUNCTION_ZOOM: float = 1.0
 const EDGE_ZOOM: float = 1.1
-const SIGN_ZOOM: float = 2.4
+## The dead end sign is shot at the game's own default zoom, not at a flattering
+## close-up. The question James asked of it is whether it can be READ while
+## driving, and 2.4 answered a question nobody has: at that zoom a sign with
+## nothing on it at all would look fine.
+const SIGN_ZOOM: float = 0.9
 const HYDRANT_ZOOM: float = 1.8
 const LABEL_ZOOM: float = 1.15
 
@@ -311,12 +315,21 @@ func _find_junction() -> Dictionary:
 ## so points 0 and 2 are the sign's own "top" and "bottom" and hand back
 ## everything this needs without reproducing any of MapBuilder's placement
 ## arithmetic. Returns {} if the current map built no terminus at all.
+## Searched from the MapBuilder down rather than through get_node("Markers").
+##
+## THAT LOOKUP SILENTLY POINTED AT THE WRONG MAP. MapBuilder.build() frees the
+## previous layers with queue_free(), which is deferred, so on the second build
+## the old "Markers" is still in the tree and Godot names the new one something
+## else. get_node_or_null("Markers") then found a node on its way out, or
+## nothing at all, and this returned {} on Windsor every time. The caller reads
+## an empty answer as "this map has no terminus", loads Elm Grove and shoots
+## there instead, which is why 28 and 36 have been pictures of Elm Grove's map
+## edge under Windsor's name since the pack was written. Elm Grove's roads end
+## exactly ON its boundary, so those two shots were also the one place the pack
+## showed a sign standing outside the world.
 func _find_edge_terminus() -> Dictionary:
-	var markers: Node2D = main._map_builder.get_node_or_null("Markers")
-	if markers == null:
-		return {}
-	for child in markers.get_children():
-		if not (child is Polygon2D) or not String(child.name).begins_with("DeadEndSign_"):
+	for child in main._map_builder.find_children("DeadEndSign_*", "Polygon2D", true, false):
+		if not is_instance_valid(child):
 			continue
 		var polygon: PackedVector2Array = (child as Polygon2D).polygon
 		if polygon.size() < 3:

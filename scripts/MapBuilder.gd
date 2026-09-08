@@ -93,15 +93,39 @@ const BARRICADE_STRIPE_WIDTH: float = 46.0
 const BARRICADE_LIGHT: Color = Color(0.88, 0.86, 0.82)
 const BARRICADE_DARK: Color = Color(0.70, 0.24, 0.18)
 
-## The dead end sign: the American yellow diamond with a black T, which is what
-## the road it is standing on would carry. Placed past the barricade, in the
-## land between the road's end and the wall, turned so the driver reads it
-## square on coming down the road.
-const SIGN_SIZE: float = 88.0
-const SIGN_STANDOFF: float = 72.0
+## The dead end sign: a yellow diamond reading DEAD END in black. Placed past
+## the barricade, in the land between the road's end and the wall, turned so the
+## driver reads it square on coming down the road.
+##
+## IT USED TO CARRY A BLACK T, WHICH SAYS SOMETHING ELSE. The yellow diamond
+## with a T on it is the American warning for a T intersection ahead: a road
+## that ends in another road you can turn onto either way. This road ends in a
+## barricade and a wall. James spotted it in the screenshot pack.
+##
+## The diamond grew from 88 to 140 with the words, because two lines of legible
+## text do not fit in an 88 unit diamond: a rectangle W by H fits a diamond of
+## full diagonal S only while W + H is under S, and DEAD over END at a size that
+## survives the 0.9 zoom is about 62 by 58. The standoff grew with it so the
+## near corner still clears the barricade, and the far corner sits at 170 units
+## past the road's end, inside the 200 unit verge.
+const SIGN_SIZE: float = 140.0
+## How far past the road's end the sign's centre stands. Half the diamond's own
+## diagonal plus clearance, so its near corner is past the barricade.
+##
+## MEASURED AGAINST BOTH MAPS. Windsor's roads stop 200 units inside the wall,
+## so its far corner lands at 170 with 30 to spare. Elm Grove's roads end
+## exactly ON its boundary, room 0.0 at every one of its sixteen termini, so its
+## barricades and signs stand outside the map in the overscan band and always
+## have: that is Milestone 8's geometry, not this sign's placement, and it is
+## recorded in DEVELOPMENT_STATUS.md rather than fixed here.
+const SIGN_STANDOFF: float = 100.0
 const SIGN_FACE: Color = Color(0.92, 0.78, 0.16)
 const SIGN_EDGE: Color = Color(0.16, 0.14, 0.10)
-const SIGN_GLYPH_WIDTH: float = 9.0
+const SIGN_TEXT: String = "DEAD\nEND"
+const SIGN_FONT_SIZE: int = 25
+## Pulls the two lines together: the default gap is set for paragraphs, and on a
+## sign it reads as two separate words rather than one legend.
+const SIGN_LINE_SPACING: int = -5
 
 ## The land outside the map, drawn so the camera's overscan shows ground rather
 ## than void. Deliberately flat and dark: it is not somewhere to go.
@@ -1039,10 +1063,10 @@ func _build_barricade(
 		parent.add_child(bar)
 
 
-## The sign: a yellow diamond with a black T, which is what a road in Windsor
-## would actually carry at a dead end. Turned so that "up" on the sign points
-## back down the road at the driver, which is the only orientation that reads
-## from a car in a top-down view.
+## The sign: a yellow diamond reading DEAD END. Turned so that "up" on the sign
+## points back down the road at the driver, which is the only orientation that
+## reads from a car in a top-down view. It therefore looks turned round in a
+## screenshot read screen-up, and is right in the game.
 func _build_dead_end_sign(
 	parent: Node2D, node: int, at: Vector2, outward: Vector2
 ) -> void:
@@ -1068,25 +1092,24 @@ func _build_dead_end_sign(
 	border.z_index = Z_TERMINUS
 	parent.add_child(border)
 
-	# The T: a stem up the middle and a bar across the top of it.
-	var stem := Line2D.new()
-	stem.name = "DeadEndSignStem_%d" % node
-	stem.points = PackedVector2Array([at - up * half * 0.42, at + up * half * 0.10])
-	stem.width = SIGN_GLYPH_WIDTH
-	stem.default_color = SIGN_EDGE
-	stem.z_index = Z_TERMINUS
-	parent.add_child(stem)
-
-	var bar := Line2D.new()
-	bar.name = "DeadEndSignBar_%d" % node
-	bar.points = PackedVector2Array([
-		at + up * half * 0.10 - right * half * 0.40,
-		at + up * half * 0.10 + right * half * 0.40,
-	])
-	bar.width = SIGN_GLYPH_WIDTH
-	bar.default_color = SIGN_EDGE
-	bar.z_index = Z_TERMINUS
-	parent.add_child(bar)
+	# The words. Centred on the font's own measurement of them, the same way the
+	# street names are, rather than on an estimate: the two have to agree with
+	# what is actually drawn, and the font is the only thing that knows.
+	var legend := Label.new()
+	legend.name = "DeadEndSignText_%d" % node
+	legend.text = SIGN_TEXT
+	legend.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	legend.add_theme_color_override("font_color", SIGN_EDGE)
+	legend.add_theme_font_size_override("font_size", SIGN_FONT_SIZE)
+	legend.add_theme_constant_override("line_spacing", SIGN_LINE_SPACING)
+	legend.z_index = Z_TERMINUS
+	legend.size = legend.get_combined_minimum_size()
+	legend.pivot_offset = legend.size / 2.0
+	legend.position = at - legend.size / 2.0
+	# Reading direction is across the sign, so the text runs along "right"; the
+	# whole sign is already turned to face the driver by "up".
+	legend.rotation = right.angle()
+	parent.add_child(legend)
 
 
 static func _distance_to_boundary(point: Vector2, bounds: Rect2) -> float:
