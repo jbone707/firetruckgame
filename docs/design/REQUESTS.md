@@ -42,3 +42,41 @@ background, `logo-icon-180.png`, `logo-wordmark.png` (horizontal, for the home
 menu), and `logo-mono.png` (single colour). Add a short logo section to the
 spec: geometry of the mark in words, hex colours, and the typeface with its
 licence.
+
+## R-003: Car body colours and signal head style, v2.2 (open)
+
+Traffic is built and on the road on both maps. It is drawn from placeholder
+values chosen to be muted and out of the way, and it should come from the
+palette instead.
+
+What is wanted, as an update to `tailboard-visual-spec.md` (version 2.2) and one
+reference image:
+
+- **Car body colours.** Eight flat opaque fills, muted and related, none of them
+  a saturated primary and none of them close to the engine's red: a street shows
+  a dozen cars at once and the engine has to be the loudest thing on it. Give
+  the hex values as an ordered list; they are picked by hashing a per-car number,
+  so the order is the only thing that matters about them. The current
+  placeholders are in `scripts/TrafficCar.gd` as `BODY_COLORS`.
+- **Car anatomy.** A car is 62 by 27 world units and is drawn as a body
+  rectangle, a thin outline, a cabin rectangle, and for the pickup a darker bed
+  panel. There are four silhouettes: saloon, hatchback, pickup, van, told apart
+  by where the cabin sits and how much of the body it takes, because at the
+  widest zoom a car is about fifteen pixels long. State the outline colour and
+  width, the cabin fill, and the cabin rectangle for each of the four as a
+  fraction of the body.
+- **Indicators and hazards.** Amber lamps at the corners, blinking. State the
+  lit and unlit hex, the lamp radius in world units, and the blink rate. A
+  yielding car shows one side; a car the engine has hit shows all four.
+- **Signal head style, against the same palette.** The head is a bar ACROSS the
+  road with three lamps in a row, red on the approaching driver's left. Confirm
+  or replace the housing, outline, lamp and halo colours in
+  `scripts/TrafficSignals.gd`, and say what an amber during a siren preemption
+  should look like if it should read differently from an ordinary amber.
+
+Files: `tailboard-visual-spec.md` (version 2.2 at the top),
+`images/traffic-v2.2.png` showing the four car shapes at 1:1 and at the widest
+zoom, with the indicator lit and unlit.
+
+Real screenshots of the built traffic are in `docs/screenshots/selected/`:
+`38_traffic_yielding.png`, `41_traffic_elm_grove.png`, `39_preempt_junction.png`.

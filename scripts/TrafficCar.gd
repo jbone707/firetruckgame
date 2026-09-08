@@ -104,6 +104,10 @@ var _points: PackedVector2Array = PackedVector2Array()
 var _piece_length: float = 0.0
 var _heading: Vector2 = Vector2.RIGHT
 var _blink: float = 0.0
+## What the lamps were last actually drawn as, so a redraw only happens when the
+## picture would change. See _process.
+var _drawn_side: int = -99
+var _drawn_lit: bool = false
 ## The stop sign, latched. A driver stops once, waits once, looks once, and then
 ## goes: without the latch the "have you stopped" test fires again the moment the
 ## car is moving into the junction and stops it in the middle of it.
@@ -416,10 +420,23 @@ func knock(direction: Vector2, distance: float) -> void:
 	queue_redraw()
 
 
+## THE BLINK IS THE ONLY THING THAT NEEDS REDRAWING, and it needs it about four
+## times a second rather than sixty.
+##
+## A car's body is drawn in its own local space, so moving and turning it costs
+## nothing to redraw: Godot keeps the canvas item and changes its transform.
+## Calling queue_redraw() every frame for every car, which the first version did,
+## re-issued twenty-four cars' worth of polygons sixty times a second for no
+## visible difference at all. It was 1.4 ms of the 2.0 ms traffic added to the
+## frame on this machine.
 func _process(delta: float) -> void:
-	# Only the blink needs a frame of its own; everything else is driven by
-	# TrafficSystem in the physics step.
 	_blink += delta
+	var side: int = indicator_side()
+	var lit: bool = side != 2 and fmod(_blink * BLINK_RATE, 1.0) < 0.55
+	if side == _drawn_side and lit == _drawn_lit:
+		return
+	_drawn_side = side
+	_drawn_lit = lit
 	queue_redraw()
 
 
@@ -473,8 +490,7 @@ func _draw_lights(half: Vector2) -> void:
 	var side: int = indicator_side()
 	if side == 2:
 		return
-	var lit: bool = fmod(_blink * BLINK_RATE, 1.0) < 0.55
-	var color: Color = INDICATOR if lit else INDICATOR_DARK
+	var color: Color = INDICATOR if _drawn_lit else INDICATOR_DARK
 	var corners: Array[Vector2] = []
 	if side == 0:
 		corners = [
