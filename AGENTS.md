@@ -291,3 +291,33 @@ estimate and choices from the first one.
 - v1.2, 2026-09-06, from Fire-Bid item 68: §6 gains one rule — `create or replace function`
   starts from the live body via `pg_get_functiondef`, never from an earlier migration file,
   and asserts on `pg_proc.prosrc` above the ledger record.
+
+## 18. This repository: branches, the design directory, and the two records
+
+Added 2026-09-08, when `DEVELOPMENT_STATUS.md` reached 1,819 lines and a fresh
+session's first act was reading eight milestones of narrative to find out what
+the game currently is.
+
+- **Work happens on a task branch,** named `task/<what-it-is>`, cut from
+  `master` and pushed after every part so partial progress lands. One pull
+  request per task, whose description is the completion report.
+- **`docs/design/` belongs to ChatGPT.** It is the only path the design side
+  writes, on the `design` branch, through pull requests James merges.
+  `.github/workflows/design-branch-guard.yml` fails a `design` pull request
+  that touches anything else. The implementation side writes exactly two files
+  in there, `README.md` and `REQUESTS.md`, and reads the rest.
+- **Two records, both kept current in the same commit as the code they
+  describe.** `STATUS.md` is the state of the project: engine version, one line
+  per system, the active task and its branch, the GameBalance table, known
+  issues, and the exact next action. It stays under 150 lines; when it grows,
+  something in it has stopped being state and become history.
+  `DECISIONS.md` is one dated line per decision James has settled, saying what
+  it supersedes. A decision recorded there is not reopened.
+- **History is history.** Milestone narratives live in
+  `docs/history/milestone-NN.md`, unchanged once written. Nothing reads them to
+  find out what is true today; that is `STATUS.md`'s job.
+- **The screenshot pack under `docs/screenshots/selected/` is committed.** It is
+  what the design side reviews, and a review of screenshots nobody outside the
+  session can open is not a review. The rest of `docs/screenshots/` is
+  generated and ignored, and `docs/.gdignore` keeps Godot from importing any of
+  it.

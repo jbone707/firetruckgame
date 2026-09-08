@@ -1,0 +1,43 @@
+name: Design branch guard
+
+# The design side writes to docs/design/ and nowhere else (DECISIONS.md,
+# 2026-09-07). This makes that a fact rather than a note in a README: a pull
+# request whose head branch is `design` fails if it changes any path outside
+# docs/design/. It says nothing about pull requests from any other branch.
+on:
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  paths:
+    if: github.head_ref == 'design'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the merge base and the head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Every changed path must be inside docs/design/
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          if [ -z "$changed" ]; then
+            echo "No changed paths. Nothing to police."
+            exit 0
+          fi
+          echo "Changed paths:"
+          echo "$changed" | sed 's/^/  /'
+          outside="$(echo "$changed" | grep -v '^docs/design/' || true)"
+          if [ -n "$outside" ]; then
+            echo
+            echo "The design branch may only change files under docs/design/."
+            echo "These are outside it:"
+            echo "$outside" | sed 's/^/  /'
+            exit 1
+          fi
+          echo
+          echo "All changed paths are inside docs/design/."

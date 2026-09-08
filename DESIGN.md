@@ -1,8 +1,15 @@
-# Fire Truck Game Design
+# Tailboard design
+
+The game specification, and only what is true of the build in this repository.
+Where this file and `docs/design/tailboard-visual-spec.md` disagree, this file
+wins until James approves a change and it is recorded in `DECISIONS.md`. That
+spec is the current authority on how things LOOK: the name, the logo, the
+palette, the type and the in-world art. `STATUS.md` says what is built and what
+is being worked on.
 
 ## What the Game Is
 
-Fire Truck Game is a top-down arcade firefighting roguelite. You drive a fire
+Tailboard is a top-down arcade firefighting roguelite. You drive a fire
 engine through a city, respond to dispatched fires, put them out with a
 roof-mounted water stream, and refill your tank at hydrants along the way.
 Crashing into things damages the truck. Finishing a call earns credits, and
@@ -62,9 +69,10 @@ a longer drive rather than a harder fire. The countdown on the HUD is still a
 plain number of seconds with nothing hidden behind it; it simply starts higher
 when the fire is further away, and it grows and says it is running out when it
 drops under thirty seconds. Running the tank dry stops the
-stream immediately; a hydrant takes a second to hook up and then fills at 50
-units a second, so a full tank is about three seconds from the moment the
-hookup begins.
+stream immediately; a hydrant's hose takes a little over half a second to
+arrive and then fills at 50 units a second, so a full tank is about three
+seconds from the moment the hookup begins. Spraying does not stop the fill: the
+two flows simply net out.
 
 Pulling up to a hydrant is meant to be easy. Its reach is drawn on the ground
 as a ring, dashed while you are still too far away and solid the moment you are
@@ -73,9 +81,11 @@ touch anything. Reach is measured from the hydrant to the nearest part of the
 engine's body rather than to its centre, so nose in, alongside and at a sloppy
 angle all work, and stopping a truck length short or overshooting by two still
 works. Rolling to a halt counts as stopped. What is still asked of you is to
-pull over to the hydrant's own side of the street. Holding E is what starts the
-hookup; nothing connects on its own, and while it is connected a hose runs from
-the hydrant to the side of the engine.
+pull over to the hydrant's own side of the street. Nothing is held and no key is
+pressed: roll into the ring at a creep and the hose shoots out on its own, takes
+about half a second to reach you, and then fills the tank. Driving away is the
+only way off. The hose hangs slack for the first stretch, pulls straight,
+trembles, and snaps.
 
 You can see the stream working. While it is actually taking health off a fire
 the impact turns into a dense white steam burst, the flames go out one at a
@@ -313,14 +323,13 @@ true now.
 
 Two things described above rest on judgement no automated check can make, so
 they are on James's playtest list rather than claimed here: how the truck FEELS
-to drive, and whether the fire effects stay readable in motion. The manual
-checklist is in `DEVELOPMENT_STATUS.md`.
+to drive, and whether the fire effects stay readable in motion.
 
-## Future, Not Implemented
+## Future, Labelled
 
-The following are part of the long-term vision but are explicitly out of
-scope for this build, and nothing here should be read as a claim that they
-exist yet:
+EVERYTHING IN THIS SECTION IS NOT BUILT. Nothing below should be read as a
+claim that it exists, and anything that becomes true moves out of this section
+and into the body of the document in the same commit that builds it.
 
 - **More real areas.** The pipeline exists and one area is imported, described
   under "The Map" above. What is not built is a second real area, any way to
