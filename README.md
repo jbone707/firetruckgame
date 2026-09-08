@@ -48,8 +48,6 @@ yourself. All of that is already in the project files.
 - **Space**: handbrake, a stronger brake
 - **Q**: toggle the siren and lights
 - **Left Mouse Button**: spray water at wherever the cursor is
-- **E**, held: hook up to a hydrant and refill. You have to be close to it and
-  nearly stopped. Driving off, or letting go of E, cancels it
 - **Z**: zoom the camera out or in, through three levels. The level you pick is
   kept for the rest of the session
 - **Escape**: pause
@@ -67,10 +65,19 @@ yourself. All of that is already in the project files.
 - Roads and sidewalks are where you can drive. Mounting the kerb is allowed and
   costs nothing. Garden fences and houses are not: the fence line, not the kerb,
   is where the engine stops.
-- Refilling takes about three seconds from the moment the hookup starts. Every
-  hydrant draws its reach on the ground, dashed when you are too far away and
-  solid once you are close enough to hold E. Nose in, alongside or at an angle
-  all work; you just have to be on the hydrant's side of the street.
+- **Hydrants hook themselves up.** There is no key. Roll into a hydrant's ring
+  at a creep and the hose shoots out on its own, takes about half a second to
+  reach you, and then fills the tank at 50 units a second. Nose in, alongside or
+  at an angle all work; you just have to be on the hydrant's side of the street.
+  Every hydrant draws its reach on the ground, dashed when you are too far away
+  and solid once you are close enough for the hose to go out.
+- **Drive off and the hose goes with you, then goes.** It hangs slack for the
+  first stretch, then pulls straight and starts to shake, and at about 260 units
+  from the hydrant it snaps, flicks back and disappears. Refilling stops there.
+  That is how you leave in a hurry: you do not have to do anything but drive.
+  When the tank fills instead, the hose reels itself back in.
+- You can spray while you are hooked up. Water comes in faster than the stream
+  takes it out, so the tank still climbs.
 - When the call is off screen an arrow at the edge of the screen points to it.
   When it is on screen the arrow goes and a marker hangs over the building.
 - Crashing hurts, and a flat-out crash hurts a lot. The engine going out of

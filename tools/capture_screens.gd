@@ -4,7 +4,7 @@ extends SceneTree
 ## Builds the real game (Main.tscn), redirects the save file exactly the way
 ## tests/run_physics_tests.gd does, and drives every state through the public
 ## API each system already exposes: WaterSystem.consume_water/spray, Hydrant's
-## own evaluate() by simulating the hydrant_hookup action, FireIncident.health
+## own evaluate() by driving the truck into range slowly, FireIncident.health
 ## and .escalation, GameSession's real state machine. Nothing here fakes a
 ## label; every PNG shows what the game actually draws when that system is put
 ## in that state.
@@ -21,8 +21,7 @@ extends SceneTree
 ##   godot --path . --script res://tools/capture_screens.gd -- --only=07_hud_time_running_out,12_hud_knocking_it_down
 ##
 ## The window this opens can stay in the background; nothing here reads real
-## keyboard or mouse input (Input.action_press/release simulate the hydrant key
-## for the hookup sequence), so it never needs focus. Regenerate the whole pack
+## keyboard or mouse input, so it never needs focus. Regenerate the whole pack
 ## after any HUD, map, or fire visual change; PNGs are gitignored on purpose so
 ## this script is the thing that is reviewed, not 35 binaries.
 ##
@@ -225,8 +224,7 @@ func _candidate_for(incident: FireIncident) -> Dictionary:
 ## its position. Called once at the end of every hydrant sequence.
 func _reset_all_hydrants() -> void:
 	for hydrant in main._hydrants:
-		hydrant._set_active(false)
-		hydrant._set_hose(false, Vector2.ZERO)
+		hydrant.reset_for_new_shift()
 
 
 ## MapBuilder's own street_label_placements(), which is a pure function of the
@@ -434,7 +432,7 @@ func _follow_truck_again(zoom_level: float) -> void:
 
 
 func _refresh_hud() -> void:
-	main._update_hydrants()
+	main._update_hydrants(1.0 / float(Engine.physics_ticks_per_second))
 	main._update_hud()
 
 
@@ -490,62 +488,57 @@ func _group_hud_states() -> void:
 		var forward: Vector2 = Vector2.RIGHT.rotated(heading)
 		var radius: float = hydrant.get_interaction_radius()
 
-		# 08: in range, but moving too fast to hook up. The tank has to be
-		# holding something for this line to be reachable at all. Main's
-		# _compose_prompt puts "Out of water" above every hydrant prompt, so on
-		# the tank 06 just drained, "Slow down to hook up" can never be the line
-		# on screen: the first run of this tool captured the out-of-water
-		# sentence here instead, with the hydrant ring lit around the truck.
-		#
-		# The speed only has to hold until _refresh_hud reads it. Main's own
+		# THE HOOKUP IS AUTOMATIC (Milestone 9 Part 0). Nothing below presses a
+		# key, because there is no key: the only inputs to the whole of this
+		# sequence are where the truck is and how fast it is going, which is
+		# exactly what a player has. Every frame of hydrant state is advanced by
+		# _refresh_hud(), which calls Main's own _update_hydrants().
+
+		# 08: in range, but moving too fast for the hose to go out. The tank has
+		# to be holding something for the shot to be about the hydrant at all,
+		# and the speed only has to hold until _refresh_hud reads it: Main's own
 		# _physics_process is off, so the prompt _update_hydrants picks is
-		# latched into the UI and stays there while _shot waits for the frame
-		# to draw and TruckController brakes the (undriven) truck back to rest.
+		# latched into the UI and stays there while _shot waits for the frame to
+		# draw and TruckController drags the (undriven) truck back to rest.
 		water.fill_tank()
 		water.consume_water(water.tank_capacity * 0.5)
 		await _place_truck(hydrant.global_position + forward * (radius * 0.4), heading)
 		truck.velocity = forward * 150.0
-		Input.action_press("hydrant_hookup")
 		await _refresh_hud()
 		await _shot("08_hud_hydrant_too_fast")
 
-		# Stationary, drained again, and holding E from here on: the real
-		# hookup -> refill -> full sequence, driven by WaterSystem's own
-		# _physics_process, which runs every physics frame regardless of Main's
-		# being disabled.
+		# Stationary and drained: the hose goes out on its own from here, and
+		# the real launch -> refill -> full -> retract sequence runs with
+		# nothing driving it but the truck standing still.
 		truck.velocity = Vector2.ZERO
 		water.consume_water(water.tank_capacity)
+		_reset_all_hydrants()
 
-		# Half way through the 1.0s (60 physics frame) hookup rather than at its
-		# first frame, so the percentage in the line is showing a hookup in
-		# progress rather than one that has not started.
-		for i in range(30):
+		# 09: half way through the hose's flight, so the shot shows a hose part
+		# way out rather than one that has not left the hydrant. The count is
+		# derived from the balance value, not typed, so retuning the launch does
+		# not silently move this shot to the wrong moment.
+		var balance: Node = truck.balance
+		var launch_frames: int = int(
+			balance.hydrant_hose_launch_time * float(Engine.physics_ticks_per_second)
+		)
+		for i in range(maxi(launch_frames / 2, 1)):
 			await physics_frame
 			await _refresh_hud()
 		await _shot("09_hud_hooking_up")
 
-		# 30 frames in already, so another 60 lands 30 frames (0.5s) past the
-		# end of the 1.0s hookup. hydrant_refill_rate is 50 units/s against a
-		# drained 100-unit tank, which leaves the bar clearly partial rather
-		# than freshly started or full.
-		#
-		# The prompt in this shot reads "Hooking up, 0%", not "Refilling", and
-		# that is what the game does rather than a mistimed capture. WaterSystem
-		# .get_hookup_progress() returns 0.0 in any state but HOOKING_UP, so
-		# once the fill actually starts, Hydrant.evaluate's
-		# "currently_refilling and hookup_progress >= 1.0" test can never be
-		# true and it falls through to HOOKING_UP with a progress of zero.
-		# Prompt.REFILLING's "Refilling" is unreachable. Left as it really
-		# renders: a screenshot pack that quietly staged the line the code
-		# cannot produce would hide the bug rather than show it.
-		for i in range(60):
+		# 10: the rest of the flight, then 40 frames of filling. The rate is 50
+		# units/s into a drained 100 unit tank, so two thirds of a second in
+		# leaves the bar and the numbers on the line clearly partial rather than
+		# freshly started or full.
+		for i in range(launch_frames - launch_frames / 2 + 40):
 			await physics_frame
 			await _refresh_hud()
 		await _shot("10_hud_refilling")
 
-		# Run the rest of the fill out. Hydrant.evaluate() reports TANK_FULL
-		# and Main's own cancel-on-not-wanting-refill logic ends the hookup
-		# without anything here telling it to.
+		# 11: run the fill out. Hydrant's own state machine reports TANK_FULL
+		# and starts reeling the hose back in without anything here telling it
+		# to, which is what the shot is of.
 		for i in range(200):
 			await physics_frame
 			await _refresh_hud()
@@ -553,7 +546,6 @@ func _group_hud_states() -> void:
 				break
 		await _refresh_hud()
 		await _shot("11_hud_tank_full")
-		Input.action_release("hydrant_hookup")
 		water.cancel_refill()
 		await _place_truck(shadetree, heading)
 		_reset_all_hydrants()
@@ -706,19 +698,26 @@ func _group_world_closeups() -> void:
 		# of. 22 needs no such help; its truck is parked almost on the hydrant.
 		var out_of_range_at: Vector2 = hydrant.global_position + forward * (radius + 70.0)
 		await _place_truck(out_of_range_at, heading)
-		Input.action_release("hydrant_hookup")
 		await _refresh_hud()
 		await _frame_point((out_of_range_at + hydrant.global_position) / 2.0, HYDRANT_ZOOM)
 		await _shot("21_hydrant_out_of_range")
 		await _follow_truck_again(CLOSEUP_ZOOM)
 
+		# 22: the hose actually connected. It has to be given the whole of its
+		# flight and a little more, or the shot catches it part way across and
+		# reads as a stray line rather than as a connection. Half a tank so it
+		# is still filling when the shutter falls, rather than already retracting.
+		water.fill_tank()
+		water.consume_water(water.tank_capacity * 0.5)
+		_reset_all_hydrants()
 		await _place_truck(hydrant.global_position + forward * (radius * 0.4), heading)
-		Input.action_press("hydrant_hookup")
-		for i in range(3):
+		var connect_frames: int = int(
+			truck.balance.hydrant_hose_launch_time * float(Engine.physics_ticks_per_second)
+		) + 6
+		for i in range(connect_frames):
 			await physics_frame
 			await _refresh_hud()
 		await _shot("22_hydrant_in_range_hose")
-		Input.action_release("hydrant_hookup")
 		water.cancel_refill()
 		await _place_truck(shadetree, heading)
 		_reset_all_hydrants()

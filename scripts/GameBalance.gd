@@ -117,18 +117,61 @@ var fire_escalation_duration: float = 45.0
 # Hydrants (handoff §6)
 # ---------------------------------------------------------------------------
 
-## Seconds a held hookup takes before refilling begins. Handoff §6 specified 2.0;
-## halved after James playtested the first build and found filling the tank slow
-## enough to be dead time rather than a decision. See hydrant_refill_rate.
-var hydrant_hookup_time: float = 1.0
+## THE HOOKUP IS AUTOMATIC (Milestone 9 Part 0). There is no hydrant key any
+## more. Rolling into a hydrant's radius under hydrant_max_hookup_speed shoots
+## the hose out and connects it; driving away pulls it tight and snaps it.
+## James's rule, in his words: "refilling is automatic when you're slowed down
+## enough in the zone; the hose shoots out and hooks up; it gets pulled tight as
+## you drive away, then snaps and disappears." This supersedes handoff §6's
+## held-E hookup and its "spraying and refilling cannot occur together".
+
+## Seconds the hose takes to fly from the hydrant to the truck, which is the
+## whole of the hookup: no water arrives until it lands. Replaces the old
+## hydrant_hookup_time of 1.0. Shorter because it is no longer a cost the player
+## pays for pressing a key, it is an animation of a thing happening to them, and
+## 0.6 is long enough to read as a hose being thrown and short enough not to be
+## a wait. See hydrant_refill_rate.
+var hydrant_hose_launch_time: float = 0.6
+
+## How far, in world units, the truck can be from the hydrant before the hose
+## stops hanging slack and starts being dragged. Below this it is drawn with the
+## sag a laid hose has; above it the sag is gone, the line is thinner, and it
+## trembles. Deliberately above hydrant_interaction_radius (160): the range rule
+## decides where a hookup can START, and once the hose is on, the truck is free
+## to pull away from the hydrant until the hose says otherwise.
+var hydrant_hose_slack_distance: float = 200.0 # invented default, not from handoff
+
+## The distance the hose gives out at, world units, measured hydrant to
+## bodywork, the same measurement the range rule uses. Refilling stops on the
+## frame this is crossed. 100 units of taut hose past the slack distance is
+## about a third of a truck length of warning: enough to see the line go thin
+## and shake before it goes.
+var hydrant_hose_snap_distance: float = 260.0 # invented default, not from handoff
+
+## Seconds of settled behaviour a hydrant needs before it will throw a second
+## hose, after one has snapped or been retracted.
+##
+## "Settled" means the truck was never both in range AND moving faster than a
+## creep. Any frame that is both resets the clock. Without it a truck sitting on
+## the edge of the radius rocking back and forth re-hooks on every crossing, and
+## the hose animation flaps. Written from James's rule "no re-hook until the
+## truck has left range or stayed under creep speed for 1.5 s", read with the
+## 1.5 s attached to both halves, which is the only reading that actually stops
+## the flapping the rule exists to stop.
+var hydrant_rehook_delay: float = 1.5 # invented default, not from handoff
+
+## How long "Hose snapped" stays on the prompt line after a snap, seconds.
+var hydrant_snap_message_time: float = 1.0 # invented default, not from handoff
 
 ## Refill rate once hooked up, water units/second, up to tank capacity. Handoff
 ## §6 specified 25.0, which took four seconds on top of the hookup to fill a
-## 100 unit tank. Doubled for the same playtest reason: one second of hookup
-## plus two seconds of filling is about three seconds for a full tank, which is
-## long enough to be a choice and short enough not to be a wait. The rules
-## around it are untouched: nearly stationary to hook up, any movement cancels,
-## and refilling still wins over spraying.
+## 100 unit tank. Doubled after a playtest: the hookup plus about two seconds of
+## filling is roughly three seconds for a full tank, which is long enough to be
+## a choice and short enough not to be a wait.
+##
+## Spraying no longer stops it. The two flows simply net out at 50 in and
+## spray_flow_rate out, so a player can stand at a hydrant and fight a fire on
+## the other side of the street at 40 units/second of gain.
 var hydrant_refill_rate: float = 50.0
 
 ## Speed, world units/second, at or below which the truck counts as "nearly

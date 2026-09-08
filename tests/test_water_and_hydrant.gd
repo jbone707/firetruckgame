@@ -132,23 +132,39 @@ func test_water_missing_the_target_still_costs_the_tank() -> void:
 	_destroy(water)
 
 
-func test_spraying_is_blocked_while_refilling_and_refill_has_priority() -> void:
+## Handoff §6 forbade spraying while refilling and gave the refill priority.
+## James replaced that rule in Milestone 9 Part 0: the two flows run at once and
+## net out. This test is the old one turned round, so the change of rule is
+## recorded as an assertion rather than only as a deletion.
+func test_spraying_and_refilling_run_together_and_the_flows_net_out() -> void:
 	var water: WaterSystem = _make_water()
+	var balance: Node = water.balance
 
 	assert_true(water.is_spray_allowed(), "spraying is allowed when not at a hydrant")
 
-	water.begin_hookup()
-	assert_false(water.is_spray_allowed(), "spraying is blocked during hookup")
+	water.begin_refill()
+	assert_eq(water.refill_state, WaterSystem.RefillState.REFILLING, "the flow is on")
+	assert_true(water.is_spray_allowed(), "spraying is allowed while hooked up too")
 
-	# Through the hookup delay and into refilling proper. Every count below is
-	# derived from GameBalance, so these prove the rule and not the numbers.
-	for _tick in range(int(water.balance.hydrant_hookup_time / FRAME_DELTA) + 2):
+	# One second of both at once, from an empty tank, with the spray missing
+	# everything so the only thing being measured is the arithmetic of the two
+	# flows. Both rates come from GameBalance, so this proves the rule and not
+	# the numbers.
+	water.water_remaining = 0.0
+	var expected: float = balance.hydrant_refill_rate - balance.spray_flow_rate
+	for _tick in range(60):
 		water._update_refill(FRAME_DELTA)
-	assert_eq(water.refill_state, WaterSystem.RefillState.REFILLING, "hookup completes into refill")
-	assert_false(water.is_spray_allowed(), "spraying is still blocked while refilling")
+		water.apply_spray_tick(FRAME_DELTA, null)
+	assert_almost_eq(
+		water.water_remaining, expected, 1.0,
+		"a second of 50 in against 10 out leaves about 40 units in the tank"
+	)
+	assert_true(
+		expected > 0.0,
+		"and the refill outruns the stream, so standing on a hydrant is a gain (%.1f)" % expected
+	)
 
 	water.cancel_refill()
-	assert_true(water.is_spray_allowed(), "spraying resumes once the refill is cancelled")
 	assert_eq(
 		water.refill_state, WaterSystem.RefillState.IDLE, "cancelling returns the system to idle"
 	)
@@ -160,14 +176,12 @@ func test_refill_fills_at_the_specified_rate_and_stops_at_capacity() -> void:
 	var balance: Node = water.balance
 	water.water_remaining = 0.0
 
-	water.begin_hookup()
-	# Hookup first: nothing arrives during the hookup delay, whatever it is set to.
-	for _tick in range(int(balance.hydrant_hookup_time / FRAME_DELTA) - 2):
-		water._update_refill(FRAME_DELTA)
-	assert_eq(water.water_remaining, 0.0, "no water arrives before the hookup completes")
+	# The hookup delay is the hose's flight and belongs to Hydrant now; by the
+	# time the water system is told to refill, the hose has landed.
+	water.begin_refill()
 
-	# One second of refilling once hooked up.
-	for _tick in range(int(balance.hydrant_hookup_time / FRAME_DELTA) + 60):
+	# One second of refilling.
+	for _tick in range(60):
 		water._update_refill(FRAME_DELTA)
 	assert_true(
 		water.water_remaining >= balance.hydrant_refill_rate * 0.95,
@@ -261,59 +275,288 @@ func test_a_lost_incident_cannot_also_be_extinguished() -> void:
 	_destroy(fire)
 
 
-func test_hydrant_refuses_a_moving_truck_and_prompts_in_words() -> void:
-	var hydrant: Hydrant = HydrantScript.new()
-	hydrant.balance = GameBalanceScript.new()
-	hydrant.resolve_balance()
-	hydrant.hydrant_id = "hyd_test"
+
+
+## ---------------------------------------------------------------------------
+## The automatic hookup (Milestone 9 Part 0)
+##
+## These walk the real Hydrant state machine one physics frame at a time, with a
+## real WaterSystem behind it wired exactly the way Main wires it, and read back
+## the string the player would have seen on the prompt line. Nothing is stubbed
+## and no state is set directly: the only inputs are where the truck is and how
+## fast it is going, which is all the player has.
+
+
+## Half the truck's length, so a test can ask for a distance from the BODYWORK,
+## which is the distance every hydrant rule is written in.
+const TRUCK_NOSE: float = TRUCK_HALF.x
+
+
+## One frame. The truck stands "distance" units from the hydrant measured to its
+## nearest edge, doing "speed". Returns the prompt line as text.
+func _hydrant_frame(
+	hydrant: Hydrant, water: WaterSystem, distance: float, speed: float
+) -> String:
+	var truck := Transform2D(0.0, Vector2(distance + TRUCK_NOSE, 0.0))
+	var outcome: Dictionary = hydrant.evaluate(
+		FRAME_DELTA, truck, TRUCK_HALF, speed, water.water_remaining, water.tank_capacity
+	)
+	# Exactly what Main does with the answer, in the same order.
+	if outcome["should_refill"]:
+		water.begin_refill()
+	else:
+		water.cancel_refill()
+	water._update_refill(FRAME_DELTA)
+	return Hydrant.prompt_text(
+		outcome["prompt"], water.water_remaining, water.tank_capacity
+	)
+
+
+## Runs frames at one distance and speed until the prompt changes, and returns
+## the new prompt. Fails on the assertion rather than hanging if it never does.
+func _run_until_prompt_changes(
+	hydrant: Hydrant, water: WaterSystem, distance: float, speed: float, from: String
+) -> String:
+	for _frame in range(int(30.0 / FRAME_DELTA)):
+		var line: String = _hydrant_frame(hydrant, water, distance, speed)
+		if line != from:
+			return line
+	return "(the prompt never left it)"
+
+
+## Slow approach, hose launch, refill, full tank, retract. The prompt line is
+## asserted in order, because the sequence IS the feature: there is no key to
+## press, so the words are the only thing telling the player what is happening.
+func test_the_automatic_hookup_walks_from_approach_to_a_retracted_hose() -> void:
+	var hydrant: Hydrant = _make_hydrant()
+	var water: WaterSystem = _make_water()
+	water.balance = hydrant.balance
 	var balance: Node = hydrant.balance
+	water.water_remaining = 0.0
 
-	var at_hydrant: Transform2D = Transform2D(0.0, Vector2.ZERO)
-	var far_away: Transform2D = Transform2D(
-		0.0, Vector2(balance.hydrant_interaction_radius * 3.0, 0.0)
-	)
-	var too_fast: float = balance.hydrant_max_hookup_speed + 25.0
-	var slow: float = balance.hydrant_max_hookup_speed - 1.0
+	var seen: Array[String] = []
 
-	var out_of_range: Dictionary = hydrant.evaluate(
-		far_away, TRUCK_HALF, slow, true, false, false, 0.0
-	)
-	assert_eq(out_of_range["prompt"], Hydrant.Prompt.NONE, "no prompt out of range")
-	assert_false(out_of_range["should_refill"], "no refill out of range")
+	# Well outside the ring, crawling: nothing to say.
+	seen.append(_hydrant_frame(hydrant, water, balance.hydrant_interaction_radius * 3.0, 5.0))
+	assert_eq(seen[0], "", "out of range the hydrant says nothing")
 
-	var moving: Dictionary = hydrant.evaluate(
-		at_hydrant, TRUCK_HALF, too_fast, true, false, false, 0.0
-	)
-	assert_eq(moving["prompt"], Hydrant.Prompt.TOO_FAST, "a moving truck is told to slow down")
-	assert_false(moving["should_refill"], "a moving truck does not refill")
+	# Inside the ring but still driving.
+	var driving: float = balance.hydrant_max_hookup_speed + 40.0
+	seen.append(_hydrant_frame(hydrant, water, 40.0, driving))
+	assert_eq(seen[1], "Slow down to hook up", "in range and moving, the player is told why not")
+	assert_eq(water.refill_state, WaterSystem.RefillState.IDLE, "and no water is arriving yet")
 
-	var not_holding: Dictionary = hydrant.evaluate(
-		at_hydrant, TRUCK_HALF, slow, false, false, false, 0.0
-	)
-	assert_eq(not_holding["prompt"], Hydrant.Prompt.HOLD_TO_HOOK_UP, "stopped, told to hold E")
-	assert_false(not_holding["should_refill"], "releasing E does not refill")
+	# Down to a creep, with NO key pressed anywhere in this test: the hose goes.
+	var creep: float = balance.hydrant_max_hookup_speed - 1.0
+	seen.append(_hydrant_frame(hydrant, water, 40.0, creep))
+	assert_eq(seen[2], "Hooking up", "slowing down starts the hookup with no input at all")
+	assert_eq(hydrant.get_state(), Hydrant.State.LAUNCHING, "the hose is in the air")
+	assert_eq(water.water_remaining, 0.0, "and no water arrives while it is still flying")
 
-	var hooking: Dictionary = hydrant.evaluate(
-		at_hydrant, TRUCK_HALF, slow, true, false, false, 0.4
-	)
-	assert_eq(hooking["prompt"], Hydrant.Prompt.HOOKING_UP, "holding E starts the hookup")
-	assert_true(hooking["should_refill"], "holding E requests the refill")
-
-	var full: Dictionary = hydrant.evaluate(at_hydrant, TRUCK_HALF, slow, true, true, true, 1.0)
-	assert_eq(full["prompt"], Hydrant.Prompt.TANK_FULL, "a full tank says so")
-	assert_false(full["should_refill"], "a full tank stops refilling")
-
-	# Every prompt is a sentence, not a colour.
+	# Through the flight and into the fill.
+	seen.append(_run_until_prompt_changes(hydrant, water, 40.0, creep, "Hooking up"))
 	assert_true(
-		Hydrant.prompt_text(Hydrant.Prompt.TOO_FAST, 0.0).length() > 0, "too fast has words"
+		seen[3].begins_with("Refilling, "),
+		"the hose lands and the fill starts, saying so with numbers (%s)" % seen[3]
 	)
-	assert_true(
-		Hydrant.prompt_text(Hydrant.Prompt.HOOKING_UP, 0.5).contains("50"),
-		"hookup progress is stated as a percentage"
+	assert_eq(hydrant.get_state(), Hydrant.State.REFILLING, "the hydrant is refilling")
+	assert_false(hydrant.is_hose_taut(), "and the hose parked at 40 units is slack, not dragged")
+
+	# The numbers on the line count up as the tank fills.
+	seen.append(_run_until_prompt_changes(hydrant, water, 40.0, creep, seen[3]))
+	assert_true(seen[4].begins_with("Refilling, "), "the numbers count up (%s)" % seen[4])
+
+	var full: String = ""
+	for _frame in range(int(30.0 / FRAME_DELTA)):
+		full = _hydrant_frame(hydrant, water, 40.0, creep)
+		if full == "Tank full":
+			break
+	seen.append(full)
+	assert_eq(seen[5], "Tank full", "a full tank says so")
+	assert_eq(hydrant.get_state(), Hydrant.State.RETRACTING, "and the hose starts coming back in")
+	assert_almost_eq(
+		water.water_remaining, water.tank_capacity, 0.0001, "the tank really is full"
 	)
-	assert_eq(Hydrant.prompt_text(Hydrant.Prompt.NONE, 0.0), "", "no prompt when there is nothing to say")
+
+	# The retract runs to the end and leaves nothing behind. It never snapped,
+	# so there is no "Hose snapped" anywhere in this sequence.
+	for _frame in range(int(balance.hydrant_hose_launch_time / FRAME_DELTA) + 4):
+		_hydrant_frame(hydrant, water, 40.0, creep)
+	assert_eq(hydrant.get_state(), Hydrant.State.IDLE, "the hose is fully back in")
+	assert_eq(hydrant.get_hose_length(), 0.0, "and gone from the screen")
+	assert_eq(water.refill_state, WaterSystem.RefillState.IDLE, "with the flow shut off")
+
+	assert_eq(
+		"|".join(PackedStringArray([seen[0], seen[1], seen[2], seen[5]])),
+		"|Slow down to hook up|Hooking up|Tank full",
+		"the prompt line reads in this order: nothing, slow down, hooking up, tank full"
+	)
 
 	_destroy(hydrant)
+	water.balance = null
+	water.free()
+
+
+## Refill, then drive away: slack, taut, snapped. The distance the hose lets go
+## at is measured rather than assumed, and asserted against the balance value.
+func test_driving_away_pulls_the_hose_taut_and_then_snaps_it() -> void:
+	var hydrant: Hydrant = _make_hydrant()
+	var water: WaterSystem = _make_water()
+	water.balance = hydrant.balance
+	var balance: Node = hydrant.balance
+	water.water_remaining = 0.0
+
+	var creep: float = balance.hydrant_max_hookup_speed - 1.0
+
+	# Get to a live refill the ordinary way.
+	for _frame in range(int(balance.hydrant_hose_launch_time / FRAME_DELTA) + 4):
+		_hydrant_frame(hydrant, water, 40.0, creep)
+	assert_eq(hydrant.get_state(), Hydrant.State.REFILLING, "hooked up and filling")
+
+	# Slack: outside the ring already, but well inside the slack distance.
+	var slack_line: String = _hydrant_frame(
+		hydrant, water, balance.hydrant_hose_slack_distance - 30.0, 120.0
+	)
+	assert_true(slack_line.begins_with("Refilling, "), "leaving the ring does not stop the fill")
+	assert_false(
+		hydrant.is_hose_taut(),
+		"and the hose is still slack at %.0f units" % (balance.hydrant_hose_slack_distance - 30.0)
+	)
+	assert_true(
+		balance.hydrant_hose_slack_distance > balance.hydrant_interaction_radius,
+		"the hose reaches well past the ring it can be started from"
+	)
+
+	# Taut: past the slack distance, not yet at the snap.
+	var taut_line: String = _hydrant_frame(
+		hydrant, water, balance.hydrant_hose_slack_distance + 30.0, 120.0
+	)
+	assert_true(taut_line.begins_with("Refilling, "), "a dragged hose still delivers water")
+	assert_true(hydrant.is_hose_taut(), "the hose is being dragged")
+
+	# And out: one unit at a time, so the distance it lets go at is measured.
+	var snapped_at: float = -1.0
+	var snap_line: String = ""
+	var water_at_snap: float = 0.0
+	for step in range(200):
+		var distance: float = balance.hydrant_hose_slack_distance + 31.0 + float(step)
+		var line: String = _hydrant_frame(hydrant, water, distance, 120.0)
+		if line == "Hose snapped":
+			snapped_at = distance
+			snap_line = line
+			water_at_snap = water.water_remaining
+			break
+	assert_eq(snap_line, "Hose snapped", "the hose does let go")
+	assert_almost_eq(
+		snapped_at, balance.hydrant_hose_snap_distance, 1.0,
+		"and it lets go at the snap distance (measured %.1f, balance says %.1f)"
+			% [snapped_at, balance.hydrant_hose_snap_distance]
+	)
+	assert_eq(
+		water.refill_state, WaterSystem.RefillState.IDLE,
+		"refilling stops on the frame it snaps, not the frame after"
+	)
+	assert_eq(hydrant.get_hose_length(), 0.0, "and the hose is gone")
+
+	# The message holds for a second, then the line clears.
+	for _frame in range(int(balance.hydrant_snap_message_time / FRAME_DELTA) - 6):
+		assert_eq(
+			_hydrant_frame(hydrant, water, 400.0, 120.0), "Hose snapped",
+			"the snap message holds while the truck drives on"
+		)
+	var after: String = _run_until_prompt_changes(hydrant, water, 400.0, 120.0, "Hose snapped")
+	assert_eq(after, "", "and then the line clears")
+	assert_almost_eq(
+		water.water_remaining, water_at_snap, 0.0001,
+		"no water arrived after the snap (%.2f)" % water.water_remaining
+	)
+
+	_destroy(hydrant)
+	water.balance = null
+	water.free()
+
+
+## The anti-flap rule. A truck rocking across the edge of the ring must not
+## throw a new hose every time it crosses back in.
+func test_a_truck_rocking_on_the_edge_of_the_ring_hooks_up_only_once() -> void:
+	var hydrant: Hydrant = _make_hydrant()
+	var water: WaterSystem = _make_water()
+	water.balance = hydrant.balance
+	var balance: Node = hydrant.balance
+	water.water_remaining = 0.0
+
+	var radius: float = balance.hydrant_interaction_radius
+	var creep: float = balance.hydrant_max_hookup_speed - 1.0
+
+	# One ordinary hookup, then snap it by pulling straight out.
+	for _frame in range(int(balance.hydrant_hose_launch_time / FRAME_DELTA) + 4):
+		_hydrant_frame(hydrant, water, radius - 10.0, creep)
+	assert_eq(hydrant.get_state(), Hydrant.State.REFILLING, "hooked up once")
+	_hydrant_frame(hydrant, water, balance.hydrant_hose_snap_distance + 1.0, 200.0)
+	assert_eq(hydrant.get_state(), Hydrant.State.IDLE, "and snapped")
+
+	# Now rock across the boundary for a second and a half, changing side every
+	# ten frames and always moving faster than a creep, which is what a truck
+	# rocking on the spot actually is.
+	var hookups: int = 0
+	var frames: int = int(balance.hydrant_rehook_delay / FRAME_DELTA)
+	for frame in range(frames):
+		var inside: bool = (frame / 10) % 2 == 0
+		var distance: float = radius - 12.0 if inside else radius + 12.0
+		_hydrant_frame(hydrant, water, distance, balance.hydrant_max_hookup_speed + 10.0)
+		if hydrant.get_state() == Hydrant.State.LAUNCHING:
+			hookups += 1
+	assert_eq(
+		hookups, 0,
+		"rocking across the ring for %.1f s throws no second hose (%d)"
+			% [balance.hydrant_rehook_delay, hookups]
+	)
+
+	# Settle properly, and it hooks up again: the lock is a delay, not a ban.
+	var relaunched: bool = false
+	for _frame in range(int((balance.hydrant_rehook_delay + 1.0) / FRAME_DELTA)):
+		_hydrant_frame(hydrant, water, radius - 12.0, creep)
+		if hydrant.get_state() != Hydrant.State.IDLE:
+			relaunched = true
+			break
+	assert_true(
+		relaunched,
+		"and once it settles for %.1f s it hooks up again" % balance.hydrant_rehook_delay
+	)
+
+	_destroy(hydrant)
+	water.balance = null
+	water.free()
+
+
+## Every prompt is a sentence, not a colour (handoff §6).
+func test_every_hydrant_prompt_is_words() -> void:
+	assert_eq(
+		Hydrant.prompt_text(Hydrant.Prompt.NONE, 0.0, 100.0), "",
+		"no prompt when there is nothing to say"
+	)
+	assert_eq(
+		Hydrant.prompt_text(Hydrant.Prompt.TOO_FAST, 0.0, 100.0), "Slow down to hook up",
+		"too fast has words"
+	)
+	assert_eq(
+		Hydrant.prompt_text(Hydrant.Prompt.HOOKING_UP, 0.0, 100.0), "Hooking up",
+		"the hookup has words"
+	)
+	assert_eq(
+		Hydrant.prompt_text(Hydrant.Prompt.REFILLING, 37.4, 100.0), "Refilling, 37/100 units",
+		"the refill carries the numbers the player is watching"
+	)
+	assert_eq(
+		Hydrant.prompt_text(Hydrant.Prompt.TANK_FULL, 100.0, 100.0), "Tank full",
+		"a full tank has words"
+	)
+	assert_eq(
+		Hydrant.prompt_text(Hydrant.Prompt.SNAPPED, 40.0, 100.0), "Hose snapped",
+		"and so does a snapped hose"
+	)
+
+
 
 
 ## The one flag every piece of suppression feedback hangs off (Part 3): the
@@ -393,14 +636,17 @@ func test_a_full_tank_takes_about_three_seconds_from_hookup() -> void:
 	var balance: Node = water.balance
 	water.water_remaining = 0.0
 
-	var expected: float = balance.hydrant_hookup_time + balance.tank_capacity / balance.hydrant_refill_rate
+	var expected: float = (
+		balance.hydrant_hose_launch_time + balance.tank_capacity / balance.hydrant_refill_rate
+	)
 	assert_true(
 		expected >= 2.0 and expected <= 4.0,
 		"hookup plus a full fill should be about three seconds, calculated %.2f" % expected
 	)
 
-	water.begin_hookup()
-	var elapsed: float = 0.0
+	# The hose flight is Hydrant's now, so it is added rather than simulated.
+	water.begin_refill()
+	var elapsed: float = balance.hydrant_hose_launch_time
 	# A generous ceiling, so a badly wrong value fails on the assertion below
 	# rather than by hanging the runner.
 	for _tick in range(int(20.0 / FRAME_DELTA)):
@@ -510,17 +756,18 @@ func test_a_slow_creep_counts_as_stopped_enough_to_hook_up() -> void:
 	)
 
 	var creeping: Dictionary = hydrant.evaluate(
-		at_hydrant, TRUCK_HALF, 18.0, true, false, false, 0.0
+		FRAME_DELTA, at_hydrant, TRUCK_HALF, 18.0, 0.0, 100.0
 	)
 	assert_eq(
 		creeping["prompt"], Hydrant.Prompt.HOOKING_UP,
-		"creeping at 18 units/s with E held starts the hookup"
+		"creeping at 18 units/s starts the hookup, with nothing held"
 	)
-	assert_true(creeping["should_refill"], "and asks for the refill")
+	assert_eq(hydrant.get_state(), Hydrant.State.LAUNCHING, "and the hose is on its way")
 
 	# Still a rule, not an abolition: driving past does not hook up.
+	hydrant.reset_for_new_shift()
 	var driving: Dictionary = hydrant.evaluate(
-		at_hydrant, TRUCK_HALF, 120.0, true, false, false, 0.0
+		FRAME_DELTA, at_hydrant, TRUCK_HALF, 120.0, 0.0, 100.0
 	)
 	assert_eq(
 		driving["prompt"], Hydrant.Prompt.TOO_FAST, "driving past is still refused, in words"

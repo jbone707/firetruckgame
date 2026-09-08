@@ -294,7 +294,7 @@ func test_a_new_shift_clears_the_previous_one_completely() -> void:
 	_extinguish_active(harness)
 	harness.truck.condition = 12.0
 	harness.water.water_remaining = 3.0
-	harness.water.begin_hookup()
+	harness.water.begin_refill()
 	harness.session._on_truck_destroyed()
 
 	var clears_before: int = harness.spawner.clear_calls
@@ -315,7 +315,7 @@ func test_a_new_shift_clears_the_previous_one_completely() -> void:
 	assert_eq(
 		harness.water.refill_state,
 		WaterSystem.RefillState.IDLE,
-		"a hookup in progress does not survive into the new shift"
+		"a refill in progress does not survive into the new shift"
 	)
 	assert_eq(harness.dispatch.call_number, 1, "and the new shift is on its first call")
 

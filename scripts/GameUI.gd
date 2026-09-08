@@ -283,7 +283,7 @@ func _build_menu_panel() -> void:
 	var controls := _make_label(
 		"W or up drives, S or down brakes then reverses, A and D steer."
 		+ " Space is a harder brake, Q toggles the lights, left mouse sprays,"
-		+ " hold E at a hydrant to refill, Escape pauses.",
+		+ " Escape pauses. Roll up to a hydrant slowly and it hooks itself up.",
 		13
 	)
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

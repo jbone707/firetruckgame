@@ -186,6 +186,16 @@ func _build_hydrants() -> void:
 		_hydrants.append(hydrant)
 
 
+## Puts every hydrant back to idle: no hose out, no settling clock, no snap
+## message. Called when a shift starts and when the development reset teleports
+## the truck, both of which move the truck without the hose being able to see it
+## happen, which would otherwise leave a hose drawn across the map (handoff §9:
+## starting a shift clears the per-run state).
+func _reset_hydrants() -> void:
+	for hydrant in _hydrants:
+		hydrant.reset_for_new_shift()
+
+
 ## Lights a fire on one of the map's incident candidate buildings.
 func spawn_incident(candidate: Dictionary) -> FireIncident:
 	var building_id: String = String(candidate["building_id"])
@@ -301,10 +311,11 @@ func _physics_process(delta: float) -> void:
 	# instead would aim at a fixed screen point as soon as the truck moved.
 	_water.set_aim_world_position(get_global_mouse_position())
 
-	_update_hydrants()
+	_update_hydrants(delta)
 
-	# Refill wins over spray, which is enforced inside WaterSystem as well; this
-	# just avoids asking for a stream that would be refused anyway.
+	# Spraying is no longer refused while hooked up (Milestone 9 Part 0): the
+	# flows net out. is_spray_allowed() is still asked, so a later rule that
+	# does refuse the stream only has to be written in one place.
 	_water.set_spray_requested(
 		Input.is_action_pressed("spray") and _water.is_spray_allowed()
 	)
@@ -312,40 +323,44 @@ func _physics_process(delta: float) -> void:
 	_update_hud()
 
 
-func _update_hydrants() -> void:
+## Every hydrant on the map gets one frame, and the answer is the prompt line
+## and whether water is arriving. NOTHING HERE READS THE KEYBOARD: the hookup is
+## automatic (Milestone 9 Part 0), and this loop is the only reason the hydrant
+## needs a frame at all.
+func _update_hydrants(delta: float) -> void:
 	# The hydrant rule measures to the truck's bodywork, not to its centre, so
 	# it needs the shape's placement and size rather than a position.
 	var truck_transform: Transform2D = _truck.global_transform
 	var truck_half_extents: Vector2 = _truck.get_collision_half_extents()
 	var truck_speed: float = _truck.get_forward_speed()
-	var hookup_held: bool = Input.is_action_pressed("hydrant_hookup")
-	var tank_is_full: bool = _water.water_remaining >= _water.tank_capacity
-	var refilling: bool = _water.refill_state != WaterSystem.RefillState.IDLE
 
 	var best_prompt: int = Hydrant.Prompt.NONE
+	var best_is_connected: bool = false
 	var wants_refill: bool = false
 
 	for hydrant in _hydrants:
 		var outcome: Dictionary = hydrant.evaluate(
-			truck_transform,
-			truck_half_extents,
-			truck_speed,
-			hookup_held,
-			tank_is_full,
-			refilling,
-			_water.get_hookup_progress()
+			delta, truck_transform, truck_half_extents, truck_speed,
+			_water.water_remaining, _water.tank_capacity
 		)
 		var prompt: int = outcome["prompt"]
-		if prompt != Hydrant.Prompt.NONE and best_prompt == Hydrant.Prompt.NONE:
-			best_prompt = prompt
+		# A hydrant with a hose out beats one that is merely nearby. Two are
+		# never in range of the same truck on either shipped map, but "the first
+		# one in the array wins" is an accident waiting for a map that puts two
+		# on one corner, and this is one line.
+		var connected: bool = int(outcome["state"]) != Hydrant.State.IDLE
+		if prompt != Hydrant.Prompt.NONE:
+			if best_prompt == Hydrant.Prompt.NONE or (connected and not best_is_connected):
+				best_prompt = prompt
+				best_is_connected = connected
 		if outcome["should_refill"]:
 			wants_refill = true
 
-	# Leaving range, releasing E, moving off, or filling up all land here as
-	# wants_refill going false, which is the single cancel path.
-	if wants_refill and _water.refill_state == WaterSystem.RefillState.IDLE:
-		_water.begin_hookup()
-	elif not wants_refill and _water.refill_state != WaterSystem.RefillState.IDLE:
+	# Leaving range, snapping the hose, or filling up all land here as
+	# wants_refill going false, which is the single stop path.
+	if wants_refill:
+		_water.begin_refill()
+	else:
 		_water.cancel_refill()
 
 	_ui.set_prompt(_compose_prompt(best_prompt))
@@ -359,11 +374,17 @@ func _compose_prompt(hydrant_prompt: int) -> String:
 	# can swallow is not a reply.
 	if _transient_message_remaining > 0.0:
 		return _transient_message
-	if _water.is_empty() and _water.refill_state == WaterSystem.RefillState.IDLE:
-		return "Out of water. Find a hydrant and hold E to refill"
-	var text: String = Hydrant.prompt_text(hydrant_prompt, _water.get_hookup_progress())
+	# A hydrant with something to say outranks the empty-tank line. It has to:
+	# the empty-tank line tells the player to go and find a hydrant, and saying
+	# it over "Hooking up" at the hydrant they have just pulled up to would be
+	# telling them to do the thing they are already doing.
+	var text: String = Hydrant.prompt_text(
+		hydrant_prompt, _water.water_remaining, _water.tank_capacity
+	)
 	if text != "":
 		return text
+	if _water.is_empty():
+		return "Out of water. Pull up slowly at a hydrant to refill"
 	# Below the two refill messages, above nothing: confirmation that the stream
 	# is actually taking health off the fire rather than washing a wall. Driven
 	# by the same flag the steam burst is, so the line and the picture can never
@@ -405,6 +426,7 @@ func _on_start_shift_pressed() -> void:
 	_shop_status = ""
 	_set_paused(false)
 	_session.start_shift()
+	_reset_hydrants()
 	# start_shift puts the truck back at the station. Without this the camera
 	# glides there from wherever the last shift ended, which on a map 12,499
 	# units across is a long, uncontrollable pan over the player's first
@@ -519,6 +541,7 @@ func _on_return_to_station_requested() -> void:
 	# not repair, refill, reset an incident timer, or award credits.
 	_truck.return_to_station(get_station_spawn_position(), get_station_spawn_heading())
 	_water.cancel_refill()
+	_reset_hydrants()
 	_camera.snap_to_target()
 	_set_paused(false)
 

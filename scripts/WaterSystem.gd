@@ -12,7 +12,10 @@ signal refill_required
 signal refill_started
 signal refill_finished
 
-enum RefillState { IDLE, HOOKING_UP, REFILLING }
+## Two states, not three. The hookup used to be timed in here, off a held key;
+## it is the hose's flight now and Hydrant owns it (Milestone 9 Part 0). By the
+## time this system is told to refill, the hose has already landed.
+enum RefillState { IDLE, REFILLING }
 
 ## How wide a shape the stream sweeps, in world units. A ray alone is fiddly to
 ## aim at this scale, so the query is a short circle swept along the aim line.
@@ -47,7 +50,6 @@ var _stream_active: bool = false
 var _suppressing: bool = false
 
 var _empty_announced: bool = false
-var _hookup_elapsed: float = 0.0
 var _steam_phase: float = 0.0
 
 @onready var _truck: TruckController = get_parent() as TruckController
@@ -117,10 +119,16 @@ func set_spray_requested(active: bool) -> void:
 	spray_requested = active
 
 
-## Refilling and spraying cannot happen together, and refilling wins
-## (handoff section 6).
+## Spraying is allowed at all times, including hooked up to a hydrant.
+##
+## Handoff section 6 forbade it and gave refilling priority. James overruled
+## that in Milestone 9 Part 0: the two flows simply net out, 50 units/second in
+## against spray_flow_rate out, so standing on a hydrant and fighting a fire
+## across the street gains water instead of costing it. The method is kept
+## because a later rule (a pumping upgrade, a damaged pump) may want to refuse
+## the stream again, and one place to say so is worth a line that returns true.
 func is_spray_allowed() -> bool:
-	return refill_state == RefillState.IDLE
+	return true
 
 
 func is_stream_active() -> bool:
@@ -231,11 +239,12 @@ func _query_stream() -> Dictionary:
 	return hit
 
 
-func begin_hookup() -> void:
-	if refill_state != RefillState.IDLE:
+## Turns the flow on. Called by Main when a hydrant's hose has landed, never
+## from an input: there is no hookup key any more.
+func begin_refill() -> void:
+	if refill_state == RefillState.REFILLING:
 		return
-	refill_state = RefillState.HOOKING_UP
-	_hookup_elapsed = 0.0
+	refill_state = RefillState.REFILLING
 	refill_started.emit()
 
 
@@ -243,26 +252,16 @@ func cancel_refill() -> void:
 	if refill_state == RefillState.IDLE:
 		return
 	refill_state = RefillState.IDLE
-	_hookup_elapsed = 0.0
 	refill_finished.emit()
 
 
-func get_hookup_progress() -> float:
-	if refill_state != RefillState.HOOKING_UP:
-		return 0.0
-	return clampf(_hookup_elapsed / balance.hydrant_hookup_time, 0.0, 1.0)
+func is_refilling() -> bool:
+	return refill_state == RefillState.REFILLING
 
 
 func _update_refill(delta: float) -> void:
-	match refill_state:
-		RefillState.HOOKING_UP:
-			_hookup_elapsed += delta
-			if _hookup_elapsed >= balance.hydrant_hookup_time:
-				refill_state = RefillState.REFILLING
-		RefillState.REFILLING:
-			add_water(balance.hydrant_refill_rate * delta)
-		_:
-			pass
+	if refill_state == RefillState.REFILLING:
+		add_water(balance.hydrant_refill_rate * delta)
 
 
 func reset_for_new_shift(upgraded: bool) -> void:

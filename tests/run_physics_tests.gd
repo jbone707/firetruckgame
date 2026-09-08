@@ -85,6 +85,8 @@ func _run() -> void:
 	await _check_the_truck_turns_off_hembree_lane_into_a_side_street()
 	await _check_the_menus_walk_the_way_a_player_walks_them()
 	await _check_every_approach_to_a_hydrant_hooks_up()
+	await _check_the_hose_hooks_up_by_itself_and_snaps_when_pulled()
+	await _check_a_truck_rocking_on_the_boundary_hooks_up_only_once()
 	await _check_the_narrowest_road_the_truck_can_turn_in()
 	await _check_the_hud_rows_never_overlap()
 	await _check_the_zoom_control_holds_its_level()
@@ -1027,15 +1029,18 @@ func _check_every_approach_to_a_hydrant_hooks_up() -> void:
 			]
 	)
 
-	# And it really is the whole rule, not just the distance: with E held and the
-	# truck stopped, this must come back as a hookup.
+	# And it really is the whole rule, not just the distance: with the truck
+	# stopped there and NOTHING held, this must start the hose.
 	var outcome: Dictionary = hydrant.evaluate(
-		truck.global_transform, half, truck.get_forward_speed(), true, false, false, 0.0
+		1.0 / float(PHYSICS_FPS), truck.global_transform, half,
+		truck.get_forward_speed(), 0.0, 100.0
 	)
 	_check(
-		outcome["should_refill"],
-		"and holding E there actually starts the refill (prompt %d)" % outcome["prompt"]
+		int(outcome["state"]) == Hydrant.State.LAUNCHING,
+		"and stopping there throws the hose on its own, no key (prompt %d, state %d)"
+			% [outcome["prompt"], outcome["state"]]
 	)
+	hydrant.reset_for_new_shift()
 
 	# Alongside: facing up the street, pulled over hard against the kerb the
 	# hydrant stands on. Pushed sideways rather than driven, because throttle
@@ -1468,6 +1473,234 @@ func _check_the_zoom_control_holds_its_level() -> void:
 		"the chosen zoom %.2f survives a change of map (got %.2f)" % [
 			chosen, camera.get_zoom_level()
 		]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+# ---------------------------------------------------------------------------
+# The automatic hookup, in the real scene (Milestone 9 Part 0)
+#
+# The unit suite walks the state machine with arithmetic. These two drive the
+# real truck, on the real map, through Main's own _update_hydrants, which is the
+# only path the game itself ever uses. Main's _physics_process is switched off
+# by _make_world (it would poll a keyboard nobody is holding), so the one
+# function under test is called by hand, once per frame, with the real delta.
+
+
+## Rolls the engine up to the station hydrant at a creep, checks the hose goes
+## out with nothing held, then drives on and measures where it lets go.
+##
+## Everything happens ALONG THE ROAD, on the axis the station's own spawn
+## heading names, and not on a convenient screen axis. The first version of this
+## check drove east and west and could never get further than 224 units from the
+## hydrant in either direction, because the station hydrant stands on the kerb of
+## a street that runs north and south: east and west are the kerb and the
+## station. It read the block as a hose that would not snap.
+func _check_the_hose_hooks_up_by_itself_and_snaps_when_pulled() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var truck: Node = world[1]
+	var water: Node = truck.get_node("WaterSystem")
+	var delta: float = 1.0 / float(PHYSICS_FPS)
+
+	var hydrant: Node = main._hydrants[0]
+	var half: Vector2 = truck.get_collision_half_extents()
+	var balance: Node = truck.balance
+	var target: Vector2 = hydrant.global_position
+
+	# The road the hydrant stands on, taken from the station's spawn heading
+	# rather than assumed.
+	var heading: float = main.get_station_spawn_heading()
+	var along: Vector2 = Vector2.RIGHT.rotated(heading)
+
+	# The tank is held empty for the whole check, refilled water thrown away at
+	# the top of every frame. Otherwise it fills in two seconds flat, the hose
+	# retracts because the job is done, and the snap this check is about never
+	# gets a chance to happen: an earlier version of this check read that tidy
+	# retract as a snap and reported it at 187 units.
+	water.water_remaining = 0.0
+
+	truck.global_position = target - along * 260.0
+	truck.rotation = heading
+	truck.velocity = Vector2.ZERO
+	await physics_frame
+	_check(
+		not hydrant.is_truck_in_range(truck.global_transform, half),
+		"the approach starts outside the ring (%.1f from the bodywork, radius %.1f)" % [
+			hydrant.distance_to_truck(truck.global_transform, half),
+			hydrant.get_interaction_radius(),
+		]
+	)
+
+	# In at a creep, nudged rather than driven, because what is under test is the
+	# hookup rule and not the accelerator.
+	var creep: float = balance.hydrant_max_hookup_speed - 1.0
+	var hooked_at_distance: float = -1.0
+	for _frame in range(6 * PHYSICS_FPS):
+		water.water_remaining = 0.0
+		truck.velocity = along * creep
+		truck.move_and_slide()
+		await physics_frame
+		main._update_hydrants(delta)
+		if hooked_at_distance < 0.0 and hydrant.has_hose_out():
+			hooked_at_distance = hydrant.distance_to_truck(truck.global_transform, half)
+		if hydrant.get_state() == Hydrant.State.REFILLING:
+			break
+
+	_check(
+		hooked_at_distance >= 0.0,
+		"creeping up to the station hydrant throws the hose with no key pressed"
+			+ " (at %.1f units from the bodywork)" % hooked_at_distance
+	)
+	_check(
+		hooked_at_distance <= hydrant.get_interaction_radius() + 1.0,
+		"and it went out inside the ring, not before it (%.1f, radius %.1f)" % [
+			hooked_at_distance, hydrant.get_interaction_radius()
+		]
+	)
+	_check(
+		hydrant.get_state() == Hydrant.State.REFILLING,
+		"and once the hose lands the tank is filling (state %d)" % hydrant.get_state()
+	)
+
+	# Water really does arrive: two frames with the drain switched off.
+	water.water_remaining = 0.0
+	truck.velocity = Vector2.ZERO
+	for _frame in range(2):
+		await physics_frame
+		main._update_hydrants(delta)
+	_check(
+		water.water_remaining > 0.0,
+		"water is actually arriving (%.2f units in two frames)" % water.water_remaining
+	)
+
+	# Now drive on down the street and find out where it lets go. Real throttle,
+	# and still draining, so the only thing that can end this hose is distance.
+	var snapped_at: float = -1.0
+	var last_connected_at: float = -1.0
+	var refilling_at_snap: bool = true
+	for _frame in range(5 * PHYSICS_FPS):
+		water.water_remaining = 0.0
+		truck.set_drive_intent(1.0, 0.0, false)
+		await physics_frame
+		main._update_hydrants(delta)
+		var distance: float = hydrant.distance_to_truck(truck.global_transform, half)
+		if hydrant.has_hose_out():
+			last_connected_at = distance
+			continue
+		snapped_at = distance
+		refilling_at_snap = water.is_refilling()
+		break
+
+	_check(
+		snapped_at >= 0.0,
+		"driving on snaps the hose (measured %.1f units from the bodywork)" % snapped_at
+	)
+	_check(
+		last_connected_at > balance.hydrant_hose_slack_distance,
+		"the hose was still attached past the slack distance, being dragged (%.1f, slack %.1f)"
+			% [last_connected_at, balance.hydrant_hose_slack_distance]
+	)
+	_check(
+		snapped_at > balance.hydrant_hose_slack_distance
+			and snapped_at < balance.hydrant_hose_snap_distance + 20.0,
+		"and it snaps between the slack distance and the snap distance (%.1f, slack %.1f,"
+			% [snapped_at, balance.hydrant_hose_slack_distance]
+			+ " snap %.1f)" % balance.hydrant_hose_snap_distance
+	)
+	_check(
+		not refilling_at_snap,
+		"and the refill stopped on the frame it snapped, not the frame after"
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## A truck rocking on the edge of the ring throws one hose, not one per
+## crossing. Same street, same axis. The tank is held empty throughout for the
+## same reason as above: a full tank ends a hose politely and would mask the
+## rule this is about.
+func _check_a_truck_rocking_on_the_boundary_hooks_up_only_once() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var truck: Node = world[1]
+	var water: Node = truck.get_node("WaterSystem")
+	var delta: float = 1.0 / float(PHYSICS_FPS)
+
+	var hydrant: Node = main._hydrants[0]
+	var balance: Node = truck.balance
+	var target: Vector2 = hydrant.global_position
+	var radius: float = hydrant.get_interaction_radius()
+	var half: Vector2 = truck.get_collision_half_extents()
+
+	var heading: float = main.get_station_spawn_heading()
+	var along: Vector2 = Vector2.RIGHT.rotated(heading)
+	truck.rotation = heading
+
+	# One hookup at rest, just inside the ring.
+	truck.global_position = target - along * (radius - 20.0 + half.x)
+	truck.velocity = Vector2.ZERO
+	for _frame in range(2 * PHYSICS_FPS):
+		water.water_remaining = 0.0
+		await physics_frame
+		main._update_hydrants(delta)
+		if hydrant.get_state() == Hydrant.State.REFILLING:
+			break
+	_check(hydrant.get_state() == Hydrant.State.REFILLING, "hooked up once, at rest")
+
+	# Snapped by being put well past the snap distance. The distance is measured
+	# and asserted rather than assumed, because move_and_slide can shove a
+	# teleported truck out of whatever it landed in.
+	truck.global_position = target - along * (balance.hydrant_hose_snap_distance + 60.0 + half.x)
+	truck.velocity = Vector2.ZERO
+	await physics_frame
+	main._update_hydrants(delta)
+	_check(
+		hydrant.distance_to_truck(truck.global_transform, half)
+			> balance.hydrant_hose_snap_distance,
+		"the truck really is past the snap distance (%.1f of %.1f)" % [
+			hydrant.distance_to_truck(truck.global_transform, half),
+			balance.hydrant_hose_snap_distance,
+		]
+	)
+	_check(not hydrant.has_hose_out(), "and the hose snapped when it was pulled clear")
+
+	# Rock across the boundary for the whole delay, always faster than a creep.
+	var hookups: int = 0
+	var frames: int = int(balance.hydrant_rehook_delay * float(PHYSICS_FPS))
+	for frame in range(frames):
+		water.water_remaining = 0.0
+		var inside: bool = (frame / 10) % 2 == 0
+		var offset: float = (radius - 15.0) if inside else (radius + 15.0)
+		truck.global_position = target - along * (offset + half.x)
+		truck.velocity = along * (balance.hydrant_max_hookup_speed + 30.0)
+		await physics_frame
+		main._update_hydrants(delta)
+		if hydrant.get_state() == Hydrant.State.LAUNCHING:
+			hookups += 1
+
+	_check(
+		hookups == 0,
+		"rocking across the ring for %.1f s after a snap throws no second hose (%d hookups)"
+			% [balance.hydrant_rehook_delay, hookups]
+	)
+
+	# And settling for the delay does let it hook up again: a delay, not a ban.
+	truck.global_position = target - along * (radius - 20.0 + half.x)
+	truck.velocity = Vector2.ZERO
+	for _frame in range(int((balance.hydrant_rehook_delay + 1.0) * float(PHYSICS_FPS))):
+		water.water_remaining = 0.0
+		await physics_frame
+		main._update_hydrants(delta)
+		if hydrant.has_hose_out():
+			break
+	_check(
+		hydrant.has_hose_out(),
+		"and once it settles for %.1f s the hose goes out again (state %d)"
+			% [balance.hydrant_rehook_delay, hydrant.get_state()]
 	)
 
 	main.queue_free()
