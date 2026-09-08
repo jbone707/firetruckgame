@@ -51,6 +51,12 @@ var _flame_phase: float = 0.0
 var _flame_seeds: Array[Vector2] = []
 var _center: Vector2 = Vector2.ZERO
 
+## The fire's hittable outline, in world coordinates: the building's own
+## footprint grown by FIRE_AREA_MARGIN, which is the same polygon the collision
+## shape is built from. Kept so the turret can measure its range to the part of
+## the fire it would actually hit.
+var _hit_polygon: PackedVector2Array = PackedVector2Array()
+
 
 func resolve_balance() -> void:
 	if balance != null:
@@ -108,8 +114,31 @@ func setup(
 	collision_polygon.polygon = local_polygon
 	add_child(collision_polygon)
 
+	_hit_polygon = shape_polygon
 	_seed_flames(shape_polygon)
 	queue_redraw()
+
+
+## How far a point is from the nearest part of the fire's hittable area, zero
+## when the point is inside it.
+##
+## THE TURRET'S RANGE RULE IS MEASURED AGAINST THIS, not against global_position.
+## This node stands at the centroid of the burning building, and a Windsor house
+## is wide enough that its middle can be out of reach from the street while the
+## burning wall facing the street is comfortably inside it. Measuring to the
+## centroid refused shots the stream would have landed, on the exact fires the
+## stream range was rescaled to reach.
+func distance_from(point: Vector2) -> float:
+	if _hit_polygon.size() < 3:
+		return point.distance_to(global_position)
+	if Geometry2D.is_point_in_polygon(point, _hit_polygon):
+		return 0.0
+	var nearest: float = INF
+	for index in range(_hit_polygon.size()):
+		var a: Vector2 = _hit_polygon[index]
+		var b: Vector2 = _hit_polygon[(index + 1) % _hit_polygon.size()]
+		nearest = minf(nearest, point.distance_to(Geometry2D.get_closest_point_to_segment(point, a, b)))
+	return nearest
 
 
 ## How long this call gets before it is lost: a fixed base for fighting the fire,

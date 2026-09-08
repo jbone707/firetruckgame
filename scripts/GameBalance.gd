@@ -507,3 +507,20 @@ var car_collision_damage_scale: float = 0.4 # invented default, not from handoff
 ## less in proportion below that. Two thirds of a car length: enough to read as
 ## being hit and not so far that the car ends up somewhere it could not be.
 var car_shove_distance: float = 42.0 # invented default, not from handoff
+
+
+# ---------------------------------------------------------------------------
+# The turret (Milestone 10 Part 4)
+# ---------------------------------------------------------------------------
+
+## How fast the roof turret can swing, radians/second. About 140 degrees a
+## second, so the worst case, the fire directly behind the nozzle, takes a little
+## over a second to come round.
+##
+## Bounded rather than instant, and the bound is doing two jobs. A turret that
+## snapped to its target would read as a cursor rather than as a machine, and it
+## would also make the line-of-sight rule invisible: the stream is queried along
+## the direction the turret is ACTUALLY pointing, so the swing and the wall in
+## the way come back as the same answer, "the ray did not reach the fire", and
+## neither costs a drop of water.
+var turret_rotation_rate: float = 2.4 # invented default, not from handoff

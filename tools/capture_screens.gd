@@ -407,8 +407,7 @@ func _place_truck(position: Vector2, heading: float) -> void:
 	truck.rotation = heading
 	truck.velocity = Vector2.ZERO
 	truck.set_drive_intent(0.0, 0.0, false)
-	water.set_aim_world_position(position + Vector2.RIGHT.rotated(heading) * 60.0)
-	water.set_spray_requested(false)
+	water.set_target(null)
 	water.cancel_refill()
 	camera.target = truck
 	for i in range(3):
@@ -587,13 +586,14 @@ func _group_hud_states() -> void:
 		)
 		var approach_heading: float = front_point.direction_to(incident.global_position).angle()
 		await _place_truck(front_point, approach_heading)
-		water.set_aim_world_position(incident.global_position)
-		water.set_spray_requested(true)
-		for i in range(10):
+		water.set_target(incident)
+		# Long enough for the turret to swing round and find the fire: it moves at
+		# turret_rotation_rate and it starts pointing wherever the last shot left it.
+		for i in range(90):
 			await physics_frame
 		await _refresh_hud()
 		await _shot("12_hud_knocking_it_down")
-		water.set_spray_requested(false)
+		water.set_target(null)
 
 		# 07: under URGENT_SECONDS of margin left, without waiting the real
 		# clock out.

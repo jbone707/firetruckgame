@@ -106,6 +106,8 @@ func _run() -> void:
 	await _check_the_siren_is_what_makes_a_car_pull_over()
 	await _check_hitting_a_car_square_stops_the_engine_and_a_graze_does_not()
 	await _check_a_windsor_shift_pays_out_with_traffic_on_the_road()
+	await _check_a_whole_shift_is_won_with_nothing_but_the_turret()
+	await _check_the_turret_holds_its_fire_with_a_wall_in_the_way()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -433,15 +435,20 @@ func _check_stream_hits_a_burning_building_from_outside() -> void:
 	var aim: Vector2 = world[4]
 
 	var health_before: float = incident.health
-	water.set_aim_world_position(aim)
-	water.set_spray_requested(true)
-	for _frame in range(PHYSICS_FPS):
+	water.set_target(incident)
+	# Two seconds, not one: the turret swings at a bounded rate and starts
+	# pointing wherever the truck's spawn heading left it.
+	for _frame in range(2 * PHYSICS_FPS):
 		await physics_frame
 
 	_check(
 		incident.health < health_before,
 		"a burning building is hittable from the street (health %.1f from %.1f)"
 			% [incident.health, health_before]
+	)
+	_check(
+		water.is_stream_active(),
+		"and the turret found it by itself, with no aim and no trigger"
 	)
 	main.queue_free()
 	await physics_frame
@@ -479,10 +486,9 @@ func _check_an_obstacle_blocks_the_stream() -> void:
 	await physics_frame
 
 	var health_before: float = incident.health
-	water.set_aim_world_position(aim)
-	water.set_spray_requested(true)
+	water.set_target(incident)
 	var water_before: float = water.water_remaining
-	for _frame in range(PHYSICS_FPS):
+	for _frame in range(2 * PHYSICS_FPS):
 		await physics_frame
 
 	_check(
@@ -490,9 +496,15 @@ func _check_an_obstacle_blocks_the_stream() -> void:
 		"an obstacle between the nozzle and the fire blocks the stream (health %.1f)"
 			% incident.health
 	)
+	# THE OPPOSITE OF WHAT THIS USED TO ASSERT (Milestone 10 Part 4). The old
+	# rule spent the tank whether or not the stream connected, because a player
+	# aiming with a mouse could miss and had to pay for it. Nobody aims any more:
+	# the turret either has a shot or it does not, and a shot it cannot take
+	# costs nothing.
 	_check(
-		water.water_remaining < water_before,
-		"and the water is still spent, because spraying at an obstacle costs the tank"
+		is_equal_approx(water.water_remaining, water_before),
+		"and not a drop is spent on a shot that cannot land (%.1f of %.1f)"
+			% [water.water_remaining, water_before]
 	)
 	main.queue_free()
 	await physics_frame
@@ -513,14 +525,18 @@ func _check_the_stream_stops_at_its_range() -> void:
 	await physics_frame
 
 	var health_before: float = incident.health
-	water.set_aim_world_position(aim)
-	water.set_spray_requested(true)
-	for _frame in range(PHYSICS_FPS):
+	var water_before: float = water.water_remaining
+	water.set_target(incident)
+	for _frame in range(2 * PHYSICS_FPS):
 		await physics_frame
 
 	_check(
 		is_equal_approx(incident.health, health_before),
 		"a fire three times the stream range away takes no damage (health %.1f)" % incident.health
+	)
+	_check(
+		is_equal_approx(water.water_remaining, water_before),
+		"and costs no water either (%.1f of %.1f)" % [water.water_remaining, water_before]
 	)
 	main.queue_free()
 	await physics_frame
@@ -2867,6 +2883,186 @@ func _check_a_windsor_shift_pays_out_with_traffic_on_the_road() -> void:
 	await physics_frame
 
 
+## Three calls cleared and 350 credits banked with nothing pressed.
+##
+## Honest about what it does and does not simulate. The engine is PLACED at the
+## kerb outside each fire and at the hydrant between them, rather than driven the
+## whole route, because driving a route is what the other checks are for and a
+## scripted drive across Windsor would be measuring the pathfinding this suite
+## does not have. What it proves is the thing Part 4 changed: from the moment the
+## engine is parked, NOTHING is pressed and NOTHING is aimed, and all three fires
+## still go out. There is no spray action left in the input map to press.
+func _check_a_whole_shift_is_won_with_nothing_but_the_turret() -> void:
+	for map_path in [WINDSOR_MAP, ELM_GROVE_MAP]:
+		var world: Array = await _make_world(map_path)
+		var main: Node = world[0]
+		var truck: TruckController = world[1]
+		var water: WaterSystem = main._water
+		var session: Node = main._session
+		var map_name: String = main.get_map_definition().map_id
+
+		# THE REAL INPUT LAYER, SWITCHED BACK ON. Every other check in this suite
+		# leaves Main's _physics_process off so it can drive the truck by hand;
+		# this one turns it on precisely so that the keyboard IS read, every
+		# frame, and reads nothing. Main is also what hands the turret its
+		# target, so running it here checks the wiring and not just the rule.
+		main._on_start_shift_pressed()
+		await physics_frame
+		main.set_physics_process(true)
+		await physics_frame
+
+		var cleared: int = 0
+		for _call in range(session.balance.calls_per_shift):
+			var incident: FireIncident = main._dispatch.active_incident
+			if incident == null or not is_instance_valid(incident):
+				break
+
+			# A fire is 100 health and suppression is 2 per unit, so 50 units of
+			# water clears one. Top up at the nearest hydrant when the tank
+			# cannot finish the call in front of it.
+			if water.water_remaining < 60.0:
+				await _fill_at_the_nearest_hydrant(main, truck, water)
+
+			var stand: Vector2 = _kerb_outside(main, incident)
+			truck.global_position = stand
+			truck.rotation = stand.direction_to(incident.global_position).angle()
+			truck.velocity = Vector2.ZERO
+			await physics_frame
+
+			# Nothing is pressed from here. The turret swings round, finds the
+			# fire, and puts it out on its own.
+			var out: bool = false
+			for _frame in range(14 * PHYSICS_FPS):
+				await physics_frame
+				if incident.is_terminal():
+					out = true
+					break
+			_check(
+				out,
+				"%s: call %d goes out with nothing pressed (health %.1f)"
+					% [map_name, cleared + 1, incident.health]
+			)
+			if not out:
+				break
+			cleared += 1
+			# The real confirmation delay, waited out rather than skipped. Every
+			# other check in this suite zeroes the countdown and calls
+			# _dispatch_next() by hand; doing that here would leave the countdown
+			# at zero, which is the value that means "nothing pending", and the
+			# next call would never come.
+			for _frame in range(6 * PHYSICS_FPS):
+				await physics_frame
+				if main._dispatch.active_incident != incident:
+					break
+
+		var expected: int = (
+			session.balance.credits_per_call * session.balance.calls_per_shift
+			+ session.balance.shift_completion_bonus
+		)
+		_check(
+			session.credits_earned_this_shift == expected,
+			"%s: a whole shift pays %d with no input but driving (%d, %d call(s) cleared)"
+				% [map_name, expected, session.credits_earned_this_shift, cleared]
+		)
+
+		main.queue_free()
+		await physics_frame
+
+
+## The point on the street the fire faces, which is the same point the dispatch
+## prices the route to. Falls back to a point one road width off the building's
+## own centre when the candidate cannot be found.
+func _kerb_outside(main: Node, incident: FireIncident) -> Vector2:
+	for candidate in main._map_builder.get_incident_candidates():
+		if String(candidate.get("id", "")) == incident.incident_id:
+			return Vector2(candidate["position"])
+	return incident.global_position + Vector2(200.0, 0.0)
+
+
+## Parks the engine at the hydrant nearest to it and waits for the tank to fill.
+## The hookup is automatic, so this is standing still and nothing else.
+func _fill_at_the_nearest_hydrant(main: Node, truck: TruckController, water: WaterSystem) -> void:
+	var nearest: Node2D = null
+	var closest: float = INF
+	for hydrant in main._hydrants:
+		var distance: float = hydrant.global_position.distance_to(truck.global_position)
+		if distance < closest:
+			closest = distance
+			nearest = hydrant
+	if nearest == null:
+		return
+	truck.global_position = nearest.global_position + Vector2(0.0, 60.0)
+	truck.velocity = Vector2.ZERO
+	for _frame in range(6 * PHYSICS_FPS):
+		await physics_frame
+		if water.water_remaining >= water.tank_capacity:
+			break
+
+
+## The occlusion rule, in the real scene: a wall between the nozzle and the fire
+## stops the turret, and stops it BEFORE it costs a drop.
+##
+## This is the check the removal proof is aimed at. Taking the "did the ray reach
+## my own target" test out of WaterSystem._physics_process, so the turret sprays
+## whenever it has a target in range, fails it on both counts: the fire loses
+## health through the wall and the tank pays for it.
+func _check_the_turret_holds_its_fire_with_a_wall_in_the_way() -> void:
+	var world: Array = await _make_fire_world()
+	var main: Node = world[0]
+	var water: WaterSystem = world[2]
+	var incident: Node = world[3]
+	var aim: Vector2 = world[4]
+
+	var nozzle: Vector2 = water.get_nozzle_global_position()
+	var blocker := StaticBody2D.new()
+	blocker.collision_layer = 0b0001
+	blocker.collision_mask = 0
+	var shape := CollisionShape2D.new()
+	var rectangle := RectangleShape2D.new()
+	rectangle.size = Vector2(10.0, 400.0)
+	shape.shape = rectangle
+	blocker.add_child(shape)
+	main.add_child(blocker)
+	blocker.global_position = nozzle.lerp(aim, 0.4)
+	blocker.rotation = (aim - nozzle).angle()
+	await physics_frame
+
+	water.set_target(incident)
+	var health_before: float = incident.health
+	var water_before: float = water.water_remaining
+	for _frame in range(2 * PHYSICS_FPS):
+		await physics_frame
+
+	_check(
+		water.get_target() == incident and water.target_in_range(),
+		"the turret has a live target in range with a wall across the shot"
+	)
+	_check(
+		not water.is_stream_active(),
+		"and holds its fire"
+	)
+	_check(
+		is_equal_approx(incident.health, health_before)
+			and is_equal_approx(water.water_remaining, water_before),
+		"costing the fire nothing and the tank nothing (%.1f health, %.1f water)"
+			% [incident.health, water.water_remaining]
+	)
+
+	# Take the wall away and the same turret, untouched, opens up.
+	blocker.queue_free()
+	await physics_frame
+	for _frame in range(2 * PHYSICS_FPS):
+		await physics_frame
+	_check(
+		incident.health < health_before,
+		"and opens up the moment the wall is gone (%.1f from %.1f)"
+			% [incident.health, health_before]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
 ## THE CASE JAMES ACTUALLY PLAYED (Milestone 9, after the first playtest).
 ##
 ## He reported: "the hose doesnt go taught and snap. it does automatic refill."
@@ -3018,7 +3214,7 @@ func _check_the_stream_reaches_a_fire_from_the_road_on_both_maps() -> void:
 		var health_before: float = incident.health
 
 		truck.balance.stream_range = 120.0
-		await _spray_at(water, fire_at)
+		await _spray_at(water, incident)
 		_check(
 			is_equal_approx(incident.health, health_before),
 			"%s: at the old 120 unit range, a second of spraying from the road does"
@@ -3027,7 +3223,7 @@ func _check_the_stream_reaches_a_fire_from_the_road_on_both_maps() -> void:
 		)
 
 		truck.balance.stream_range = shipped_range
-		await _spray_at(water, fire_at)
+		await _spray_at(water, incident)
 		_check(
 			incident.health < health_before,
 			"%s: at %.0f it takes health off the fire from the same place"
@@ -3039,12 +3235,11 @@ func _check_the_stream_reaches_a_fire_from_the_road_on_both_maps() -> void:
 		await physics_frame
 
 
-## One second of the real turret aimed at a world point, trigger held.
-func _spray_at(water: Node, target: Vector2) -> void:
-	water.set_aim_world_position(target)
-	water.set_spray_requested(true)
-	for _frame in range(PHYSICS_FPS):
-		water.set_aim_world_position(target)
+## Two seconds of the real turret pointed at a real fire, which is the only
+## control it has. Two rather than one because the swing is bounded.
+func _spray_at(water: Node, target: Object) -> void:
+	water.set_target(target)
+	for _frame in range(2 * PHYSICS_FPS):
 		await physics_frame
-	water.set_spray_requested(false)
+	water.set_target(null)
 	await physics_frame

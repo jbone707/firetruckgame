@@ -378,22 +378,14 @@ func _physics_process(delta: float) -> void:
 		get_viewport_rect().size.y / maxf(_camera.get_zoom_level(), 0.01)
 	)
 
-	# get_global_mouse_position() on a CanvasItem already accounts for the
-	# canvas transform, so this is the world point under the cursor with the
-	# camera wherever it currently is. Reading the raw viewport mouse position
-	# instead would aim at a fixed screen point as soon as the truck moved.
-	_water.set_aim_world_position(get_global_mouse_position())
-
 	_update_hydrants(delta)
 
-	# Spraying is no longer refused while hooked up (Milestone 9 Part 0): the
-	# flows net out. is_spray_allowed() is still asked, so a later rule that
-	# does refuse the stream only has to be written in one place.
-	_water.set_spray_requested(
-		Input.is_action_pressed("spray")
-		and _water.is_spray_allowed()
-		and not _ui.is_pointer_over_minimap()
-	)
+	# The turret's whole input, once a frame: the fire it is meant to be putting
+	# out, or nothing. No aim, no trigger, no mouse (Milestone 10 Part 4). What
+	# it does with that is the turret's business, including whether it can see
+	# the fire at all.
+	var incident: FireIncident = _dispatch.active_incident
+	_water.set_target(incident if incident != null and is_instance_valid(incident) else null)
 
 	_update_hud()
 
@@ -601,9 +593,12 @@ func _refresh_shop() -> void:
 
 func _on_session_state_changed(state: int) -> void:
 	# Traffic belongs to a shift. Anything that is not play clears the road, so
-	# cars are not driving round behind the home menu or the results screen.
+	# cars are not driving round behind the home menu or the results screen. The
+	# turret's target goes with it, so it is not still spraying at a fire on a
+	# map nobody is looking at.
 	if state != GameSession.State.PLAYING:
 		_traffic.set_enabled(false)
+		_water.set_target(null)
 	match state:
 		GameSession.State.MENU:
 			_ui.show_menu()
@@ -650,7 +645,6 @@ func _set_paused(paused: bool) -> void:
 		# Drop any intent held at the moment of pausing, so releasing the key
 		# while paused does not leave the truck accelerating on resume.
 		_truck.set_drive_intent(0.0, 0.0, false)
-		_water.set_spray_requested(false)
 
 
 func _set_siren(active: bool) -> void:

@@ -52,11 +52,24 @@ see rather than something you notice later in the corner of the screen.
 
 ## Water Model
 
-Water is tracked in abstract units, not gallons: a 100-unit tank, a
-10-unit-per-second spray, drained only while actively spraying. The roof
-turret aims at wherever the mouse is pointing in the world, and its stream
-finds the nearest valid target within its range, so it hits a burning
-building's exterior rather than being blocked by that building's own walls.
+Water is tracked in abstract units, not gallons: a 100-unit tank and a
+10-unit-per-second spray.
+
+**The turret is automatic and there is no aim.** While the active call is within
+the stream's reach and the line from the nozzle to the fire is clear, the turret
+swings towards it at a bounded rate and opens up; out of reach, off target, or
+with anything in the way, it holds where it is and shuts off. Range is measured
+to the nearest part of the fire's own hittable area rather than to the middle of
+the burning building, because a house is wide enough that its centre can be out
+of reach from the street while the wall facing the street is not.
+
+**Water is spent only while it is going into a fire.** A shot that cannot land
+costs nothing. This replaces the old rule that the tank paid whether or not the
+stream connected, which existed because a player aiming with a mouse could miss
+and had to be charged for it. Nobody aims any more, so nobody misses: what the
+player decides is where to park, and the stream reaching one road width is what
+makes that decision matter.
+
 A fire has two separate values: its health, which drops while it is hit
 directly and reaches zero when it is put out, and its escalation, which
 climbs on its own from the moment it is dispatched until it either gets

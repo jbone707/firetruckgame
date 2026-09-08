@@ -3,9 +3,19 @@ class_name WaterSystem
 ## The tank, the roof turret, stream targeting, suppression and refill state.
 ##
 ## Mounted on the truck so the nozzle origin moves with it, but the turret aims
-## independently of the truck's heading (handoff section 5). Aim comes in as a
-## world position through set_aim_world_position(), so the mouse-to-world
-## conversion happens once, in Main, where the camera is known.
+## independently of the truck's heading (handoff section 5).
+##
+## THE TURRET IS AUTOMATIC. There is no aim and no trigger. Main hands this
+## system the active incident and nothing else; the turret decides for itself
+## whether it can see the fire, swings towards it at a bounded rate, and sprays
+## when the stream would actually land on it. Off target, out of range, or with
+## anything in the way, it holds where it is and shuts the water off.
+##
+## This supersedes handoff section 5's mouse aim, the click trigger, and the
+## rule that a missed shot still costs the tank. Water is spent only while it is
+## going into a fire. The player's job is the drive and the parking; where the
+## nozzle points was never a decision anyone was making well with a mouse while
+## steering.
 
 signal water_changed(remaining: float, capacity: float)
 signal refill_required
@@ -31,11 +41,11 @@ var balance: Node = null
 var water_remaining: float = 0.0
 var tank_capacity: float = 0.0
 
-var spray_requested: bool = false
 var refill_state: RefillState = RefillState.IDLE
 
-## Set by Main each frame from the mouse. World coordinates, not screen.
-var aim_world_position: Vector2 = Vector2.ZERO
+## The fire the turret is working on, handed in by Main each frame. Null between
+## calls, on the menus, and once a call is out.
+var _target: Object = null
 
 ## The body the stream is currently hitting, for drawing the splash. Null when
 ## the stream reaches its full range without hitting anything.
@@ -111,12 +121,38 @@ func add_water(amount: float) -> float:
 	return added
 
 
-func set_aim_world_position(target: Vector2) -> void:
-	aim_world_position = target
+## The active incident, or null. The only control this system has.
+func set_target(target: Object) -> void:
+	if target != null and not is_instance_valid(target):
+		target = null
+	if target != null and target.has_method("is_terminal") and target.is_terminal():
+		target = null
+	_target = target
 
 
-func set_spray_requested(active: bool) -> void:
-	spray_requested = active
+func get_target() -> Object:
+	return _target
+
+
+## Where the turret is trying to point, in world space, or the nozzle itself
+## when there is nothing to point at.
+func aim_point() -> Vector2:
+	if _target == null:
+		return global_position
+	return (_target as Node2D).global_position
+
+
+## Whether the fire is close enough to reach at all. Measured from the nozzle,
+## which is where the water comes from, and to the nearest part of the fire's own
+## hittable area rather than to the middle of the burning building: a Windsor
+## house is wide enough that its centre can be out of reach from the street while
+## the wall facing the street is not.
+func target_in_range() -> bool:
+	if _target == null:
+		return false
+	if _target.has_method("distance_from"):
+		return _target.distance_from(global_position) <= balance.stream_range
+	return global_position.distance_to(aim_point()) <= balance.stream_range
 
 
 ## Spraying is allowed at all times, including hooked up to a hydrant.
@@ -170,38 +206,72 @@ func get_nozzle_global_position() -> Vector2:
 
 
 func _physics_process(delta: float) -> void:
-	_update_turret_aim()
+	_update_turret_aim(delta)
 	_update_refill(delta)
 
 	_steam_phase += delta
 
-	var wants_stream: bool = spray_requested and is_spray_allowed() and not is_empty()
-	if not wants_stream:
-		if spray_requested and is_empty() and not _empty_announced:
+	# Nothing to fight, nothing in reach, or a dry tank: hold and shut off. The
+	# turret keeps the rotation it had, so it does not swing back to a rest
+	# position every time a call is cleared.
+	if _target == null or not target_in_range() or not is_spray_allowed() or is_empty():
+		if _target != null and target_in_range() and is_empty() and not _empty_announced:
 			_empty_announced = true
 			refill_required.emit()
 		_suppressing = false
+		_has_impact = false
 		if _stream_active:
 			_stream_active = false
 			queue_redraw()
 		return
 
+	# The line of sight, asked as a real query along the direction the turret is
+	# ACTUALLY pointing rather than the direction it wishes it were. That single
+	# choice is what makes both the occlusion rule and the swing free: a wall in
+	# the way and a turret half way round its travel both come back as "the ray
+	# did not reach the fire", and neither costs a drop.
 	var hit: Dictionary = _query_stream()
-	var target: Object = hit.get("fire", null)
+	var struck: Object = hit.get("fire", null)
+	if struck != _target:
+		_suppressing = false
+		_has_impact = hit.has("point")
+		_impact_point = hit.get("point", Vector2.ZERO)
+		if _stream_active:
+			_stream_active = false
+		queue_redraw()
+		return
+
 	_has_impact = hit.has("point")
 	_impact_point = hit.get("point", Vector2.ZERO)
 
-	apply_spray_tick(delta, target)
+	apply_spray_tick(delta, struck)
 
 	_stream_active = true
 	queue_redraw()
 
 
-func _update_turret_aim() -> void:
-	# global_rotation, not rotation: the turret must ignore the truck's heading.
-	var to_target: Vector2 = aim_world_position - global_position
-	if to_target.length_squared() > 1.0:
-		global_rotation = to_target.angle()
+## Swings the turret towards the fire at a bounded rate.
+##
+## global_rotation, not rotation: the turret must ignore the truck's heading, so
+## a truck turning under it does not drag the aim round with it. Bounded because
+## a turret that snapped to its target would make the occlusion rule invisible
+## and would look like a cursor rather than a machine.
+func _update_turret_aim(delta: float) -> void:
+	if _target == null:
+		return
+	var to_target: Vector2 = aim_point() - global_position
+	if to_target.length_squared() <= 1.0:
+		return
+	global_rotation = _rotate_towards(
+		global_rotation, to_target.angle(), balance.turret_rotation_rate * delta
+	)
+
+
+## The shortest way round, capped. Static and free of node state so the swing can
+## be checked as arithmetic.
+static func _rotate_towards(from: float, to: float, most: float) -> float:
+	var difference: float = wrapf(to - from, -PI, PI)
+	return from + clampf(difference, -most, most)
 
 
 ## Finds what the stream hits first.
@@ -269,7 +339,7 @@ func reset_for_new_shift(upgraded: bool) -> void:
 	cancel_refill()
 	configure_capacity(upgraded)
 	fill_tank()
-	spray_requested = false
+	_target = null
 	_stream_active = false
 	_empty_announced = false
 	queue_redraw()
