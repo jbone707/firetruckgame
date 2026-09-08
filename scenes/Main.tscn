@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/Truck.tscn" id="2_truck"]
@@ -9,6 +9,7 @@
 [ext_resource type="Script" path="res://scripts/GameSession.gd" id="7_session"]
 [ext_resource type="Script" path="res://scripts/GameUI.gd" id="8_ui"]
 [ext_resource type="Script" path="res://scripts/TrafficSignals.gd" id="9_signals"]
+[ext_resource type="Script" path="res://scripts/TrafficSystem.gd" id="10_traffic"]
 
 [node name="Main" type="Node2D"]
 process_mode = 3
@@ -34,6 +35,12 @@ z_index = 3
 unique_name_in_owner = true
 process_mode = 1
 z_index = 4
+
+[node name="Traffic" type="Node2D" parent="."]
+unique_name_in_owner = true
+process_mode = 1
+z_index = 5
+script = ExtResource("10_traffic")
 
 [node name="Truck" parent="." instance=ExtResource("2_truck")]
 unique_name_in_owner = true

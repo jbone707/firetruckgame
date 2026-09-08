@@ -13,6 +13,7 @@ extends Node2D
 @onready var _pause_menu: PauseMenu = %PauseMenu
 @onready var _hydrants_root: Node2D = %Hydrants
 @onready var _signals: TrafficSignals = %TrafficSignals
+@onready var _traffic: TrafficSystem = %Traffic
 @onready var _incidents_root: Node2D = %Incidents
 @onready var _dispatch: DispatchManager = %Dispatch
 @onready var _session: GameSession = %Session
@@ -82,6 +83,9 @@ func _ready() -> void:
 	# A crash should be something the player sees, not only something the
 	# condition bar reports after the fact.
 	_truck.truck_damaged.connect(_on_truck_damaged)
+	# Hitting a car is worth saying even when it costs nothing, so this is wired
+	# separately from the damage signal.
+	_truck.struck_a_vehicle.connect(_on_struck_a_vehicle)
 	_water.water_changed.connect(_ui.set_water)
 
 	_ui.set_credits(_session.get_credits())
@@ -130,6 +134,8 @@ func load_map(path: String) -> void:
 	# The signal heads and the stop signs, from the lane model the builder just
 	# derived. Rebuilt per map, like everything else the map owns.
 	_signals.configure(_map_builder.get_lane_graph())
+	# And the traffic, which drives the same lanes and obeys those signals.
+	_traffic.configure(_map_builder.get_lane_graph(), _signals)
 
 	# The minimap's static half is built once per map, here, from the same
 	# definition and the same hydrant list everything else on the map came from.
@@ -355,22 +361,31 @@ func _physics_process(delta: float) -> void:
 	)
 	_truck.set_drive_intent(throttle, steering, Input.is_action_pressed("handbrake"))
 
-	# get_global_mouse_position() on a CanvasItem already accounts for the
-	# canvas transform, so this is the world point under the cursor with the
-	# camera wherever it currently is. Reading the raw viewport mouse position
-	# instead would aim at a fixed screen point as soon as the truck moved.
-	_water.set_aim_world_position(get_global_mouse_position())
+	# Where the engine is and whether its siren is on, for signal preemption and
+	# for every driver deciding whether to pull over. Pushed rather than pulled:
+	# neither of those nodes is given the truck, because this node is the one
+	# that knows about all three.
+	_signals.set_engine_state(
+		_truck.global_position, _truck.get_forward(), _truck.siren_active
+	)
+	_traffic.set_engine_state(
+		_truck.global_position, _truck.get_forward(), _truck.siren_active
+	)
+	# Cars appear and vanish in screen heights rather than in world units, so the
+	# system has to be told how much world a screen is at the zoom in use. Read
+	# live, because Z changes it mid-shift.
+	_traffic.set_screen_height(
+		get_viewport_rect().size.y / maxf(_camera.get_zoom_level(), 0.01)
+	)
 
 	_update_hydrants(delta)
 
-	# Spraying is no longer refused while hooked up (Milestone 9 Part 0): the
-	# flows net out. is_spray_allowed() is still asked, so a later rule that
-	# does refuse the stream only has to be written in one place.
-	_water.set_spray_requested(
-		Input.is_action_pressed("spray")
-		and _water.is_spray_allowed()
-		and not _ui.is_pointer_over_minimap()
-	)
+	# The turret's whole input, once a frame: the fire it is meant to be putting
+	# out, or nothing. No aim, no trigger, no mouse (Milestone 10 Part 4). What
+	# it does with that is the turret's business, including whether it can see
+	# the fire at all.
+	var incident: FireIncident = _dispatch.active_incident
+	_water.set_target(incident if incident != null and is_instance_valid(incident) else null)
 
 	_update_hud()
 
@@ -450,6 +465,13 @@ func _on_truck_damaged(_amount: float, impact_speed: float) -> void:
 	_camera.shake(impact_speed)
 
 
+## Hitting a car. The glyph goes up whatever it cost, because the player needs
+## to know they hit somebody; the condition bar and the shake say how much it
+## cost, and at a crawl the honest answer is nothing.
+func _on_struck_a_vehicle(_car: Node, _impact_speed: float, _squareness: float) -> void:
+	_ui.flash_contact()
+
+
 func _update_hud() -> void:
 	var incident: FireIncident = _dispatch.active_incident
 	var live: bool = (
@@ -512,6 +534,10 @@ func _on_start_shift_pressed() -> void:
 	# this one handler (handoff §9: starting a shift clears the old one).
 	_reset_hydrants()
 	_signals.reset_for_new_shift()
+	# One seed for the whole shift's traffic: the same drivers with the same
+	# flaws, taking the same turns, for as long as the shift lasts. A new one
+	# every shift is what makes the flawed drivers a different set each time.
+	_traffic.start_shift(randi())
 	# start_shift puts the truck back at the station. Without this the camera
 	# glides there from wherever the last shift ended, which on a map 12,499
 	# units across is a long, uncontrollable pan over the player's first
@@ -566,6 +592,13 @@ func _refresh_shop() -> void:
 
 
 func _on_session_state_changed(state: int) -> void:
+	# Traffic belongs to a shift. Anything that is not play clears the road, so
+	# cars are not driving round behind the home menu or the results screen. The
+	# turret's target goes with it, so it is not still spraying at a fire on a
+	# map nobody is looking at.
+	if state != GameSession.State.PLAYING:
+		_traffic.set_enabled(false)
+		_water.set_target(null)
 	match state:
 		GameSession.State.MENU:
 			_ui.show_menu()
@@ -575,6 +608,7 @@ func _on_session_state_changed(state: int) -> void:
 			_ui.show_credits()
 		GameSession.State.PLAYING:
 			_ui.show_playing()
+			_traffic.set_enabled(true)
 			_ui.set_condition(_truck.condition, _truck.max_condition)
 			_ui.set_water(_water.water_remaining, _water.tank_capacity)
 			_ui.set_credits(_session.get_credits())
@@ -611,7 +645,6 @@ func _set_paused(paused: bool) -> void:
 		# Drop any intent held at the moment of pausing, so releasing the key
 		# while paused does not leave the truck accelerating on resume.
 		_truck.set_drive_intent(0.0, 0.0, false)
-		_water.set_spray_requested(false)
 
 
 func _set_siren(active: bool) -> void:

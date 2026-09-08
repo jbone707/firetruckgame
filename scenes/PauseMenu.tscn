@@ -64,7 +64,7 @@ theme_override_font_sizes/font_size = 13
 
 [node name="ControlsHint" type="Label" parent="Center/Panel/Margin/Rows"]
 layout_mode = 2
-text = "Z changes how far the camera is zoomed out, through three levels. M turns the minimap in the corner off and on, and N zooms the minimap without moving the camera. The button in the minimap corner does the same."
+text = "The turret and the hydrant are automatic. There is no aim, no spray key and no hookup key: drive, and the engine does the rest. Z changes how far the camera is zoomed out, through three levels. M turns the minimap in the corner off and on, and N zooms the minimap without moving the camera. The button in the minimap corner does the same."
 horizontal_alignment = 1
 autowrap_mode = 2
 custom_minimum_size = Vector2(280, 0)

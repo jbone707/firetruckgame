@@ -1,8 +1,15 @@
-# Fire Truck Game Design
+# Tailboard design
+
+The game specification, and only what is true of the build in this repository.
+Where this file and `docs/design/tailboard-visual-spec.md` disagree, this file
+wins until James approves a change and it is recorded in `DECISIONS.md`. That
+spec is the current authority on how things LOOK: the name, the logo, the
+palette, the type and the in-world art. `STATUS.md` says what is built and what
+is being worked on.
 
 ## What the Game Is
 
-Fire Truck Game is a top-down arcade firefighting roguelite. You drive a fire
+Tailboard is a top-down arcade firefighting roguelite. You drive a fire
 engine through a city, respond to dispatched fires, put them out with a
 roof-mounted water stream, and refill your tank at hydrants along the way.
 Crashing into things damages the truck. Finishing a call earns credits, and
@@ -45,11 +52,24 @@ see rather than something you notice later in the corner of the screen.
 
 ## Water Model
 
-Water is tracked in abstract units, not gallons: a 100-unit tank, a
-10-unit-per-second spray, drained only while actively spraying. The roof
-turret aims at wherever the mouse is pointing in the world, and its stream
-finds the nearest valid target within its range, so it hits a burning
-building's exterior rather than being blocked by that building's own walls.
+Water is tracked in abstract units, not gallons: a 100-unit tank and a
+10-unit-per-second spray.
+
+**The turret is automatic and there is no aim.** While the active call is within
+the stream's reach and the line from the nozzle to the fire is clear, the turret
+swings towards it at a bounded rate and opens up; out of reach, off target, or
+with anything in the way, it holds where it is and shuts off. Range is measured
+to the nearest part of the fire's own hittable area rather than to the middle of
+the burning building, because a house is wide enough that its centre can be out
+of reach from the street while the wall facing the street is not.
+
+**Water is spent only while it is going into a fire.** A shot that cannot land
+costs nothing. This replaces the old rule that the tank paid whether or not the
+stream connected, which existed because a player aiming with a mouse could miss
+and had to be charged for it. Nobody aims any more, so nobody misses: what the
+player decides is where to park, and the stream reaching one road width is what
+makes that decision matter.
+
 A fire has two separate values: its health, which drops while it is hit
 directly and reaches zero when it is put out, and its escalation, which
 climbs on its own from the moment it is dispatched until it either gets
@@ -62,9 +82,10 @@ a longer drive rather than a harder fire. The countdown on the HUD is still a
 plain number of seconds with nothing hidden behind it; it simply starts higher
 when the fire is further away, and it grows and says it is running out when it
 drops under thirty seconds. Running the tank dry stops the
-stream immediately; a hydrant takes a second to hook up and then fills at 50
-units a second, so a full tank is about three seconds from the moment the
-hookup begins.
+stream immediately; a hydrant's hose takes a little over half a second to
+arrive and then fills at 50 units a second, so a full tank is about three
+seconds from the moment the hookup begins. Spraying does not stop the fill: the
+two flows simply net out.
 
 Pulling up to a hydrant is meant to be easy. Its reach is drawn on the ground
 as a ring, dashed while you are still too far away and solid the moment you are
@@ -73,9 +94,11 @@ touch anything. Reach is measured from the hydrant to the nearest part of the
 engine's body rather than to its centre, so nose in, alongside and at a sloppy
 angle all work, and stopping a truck length short or overshooting by two still
 works. Rolling to a halt counts as stopped. What is still asked of you is to
-pull over to the hydrant's own side of the street. Holding E is what starts the
-hookup; nothing connects on its own, and while it is connected a hose runs from
-the hydrant to the side of the engine.
+pull over to the hydrant's own side of the street. Nothing is held and no key is
+pressed: roll into the ring at a creep and the hose shoots out on its own, takes
+about half a second to reach you, and then fills the tank. Driving away is the
+only way off. The hose hangs slack for the first stretch, pulls straight,
+trembles, and snaps.
 
 You can see the stream working. While it is actually taking health off a fire
 the impact turns into a dense white steam burst, the flames go out one at a
@@ -88,6 +111,61 @@ Away from the call, an arrow at the edge of the screen points at the fire
 along the line from the middle of the screen, and disappears the moment the
 fire itself is on screen, where a marker hangs over the burning building
 instead.
+
+## Traffic, and the Siren
+
+**Getting to the fire through traffic without hitting anyone is the driving
+game.** The siren is the tool that opens gaps, and everything below exists to
+make that one sentence true.
+
+Cars drive the lane network the roads derive: two lanes to a street, one each
+way, with turns curving across every junction. They keep to a class speed and a
+following gap, stop on a red, stop on an amber unless they are already too close
+to stop, wait at a stop sign for the road they are joining, give way to the right
+where nothing controls the junction, and never enter a junction they cannot
+clear. Cars never collide with each other; the following rule is what keeps them
+apart, and it is a better rule than contact resolution because a driver who
+simply does not run into the car in front never needs getting unstuck.
+
+**Cars are solid to the engine.** They sit on their own physics layer, which the
+engine's mask includes, so a car in the road is a thing in the road. A crawl into
+one is free, on the same threshold that makes a crawl into a fence free. Above it
+the engine loses condition at four tenths of what a wall costs, and loses speed
+in proportion to how square the hit was: a T-bone is very nearly a dead stop, a
+flank brushing a flank scrubs almost nothing. The struck car is shoved a short
+way, stops, and puts its hazards on, and a glyph appears beside the condition bar
+for a second so a contact is never something the player only infers from a
+number. The engine may use the oncoming lane and the sidewalk to get past
+anything; nothing stops it, and no signal ever applies to it.
+
+With the siren on, drivers inside the perceive distance do what the DMV says.
+Each takes half a second to two seconds to notice, from the shift's own seed,
+then indicates, drifts to the right edge of the lane or onto the sidewalk over
+about a second, stops, and waits until the engine is past plus a second or two.
+Oncoming traffic does the same on its own side. A car already in a junction
+clears through it rather than stopping across the mouth, and a car stopped at a
+red stays stopped: yielding never puts a car anywhere a light says it may not go.
+
+**About one driver in ten has one thing wrong with them**, a different set every
+shift. One does not notice until the engine is close. One freezes in the lane
+instead of pulling over. One pulls left. One is committed to a left turn and
+takes up the turn position anyway. With the siren off, most drivers ignore the
+engine entirely and about one in five still pulls over for one close behind.
+
+**Signals are preempted by the siren, and the delay is the point.** A signalled
+junction the engine is approaching, inside the preempt distance, clears its cross
+traffic for it: the arms that were moving take an amber, then every arm is red,
+and only then does the engine's arm go green. That is four seconds, and a
+flat-out engine covers a thousand units in four seconds, so arriving fast means
+arriving into cross traffic that has not finished stopping. There is no
+confirmation light. After the engine is past, the junction holds its green for a
+moment and then rejoins the cycle at the next phase.
+
+The density is light on purpose: about three cars to a screen on a through
+street, about one on a residential one, none to one on a court, and never more
+than the hard cap. Cars appear and disappear outside the view, about a screen and
+a half out, so the population around the engine stays right without anything
+being seen to arrive.
 
 ## The Map
 
@@ -239,7 +317,14 @@ and slip roads get nothing.
 
 ### The camera, and the first call of a shift
 
-The camera is north up and follows the truck, leading it a little at speed.
+The camera is north up and follows the truck, leading it by two seconds of
+travel at speed. The lead is a time and not a distance, because what a driver
+needs is the road they are about to be on, and it is clamped to a third of the
+screen so the engine sits low in the frame rather than being pushed out of it:
+flat out on the default zoom the engine is five sixths of the way down its own
+view with about 630 units of road ahead of it, which is two and a half seconds
+at that speed. At rest it is back in the middle. The change is eased, so lifting
+off the throttle slides the view rather than snapping it.
 **Z cycles three zoom levels**, and all three are kept because all three are
 useful: one street, two streets, and about a third of the map. It began as a
 development key so the right number could be chosen by looking rather than
@@ -313,22 +398,22 @@ true now.
 
 Two things described above rest on judgement no automated check can make, so
 they are on James's playtest list rather than claimed here: how the truck FEELS
-to drive, and whether the fire effects stay readable in motion. The manual
-checklist is in `DEVELOPMENT_STATUS.md`.
+to drive, and whether the fire effects stay readable in motion.
 
-## Future, Not Implemented
+## Future, Labelled
 
-The following are part of the long-term vision but are explicitly out of
-scope for this build, and nothing here should be read as a claim that they
-exist yet:
+EVERYTHING IN THIS SECTION IS NOT BUILT. Nothing below should be read as a
+claim that it exists, and anything that becomes true moves out of this section
+and into the body of the document in the same commit that builds it.
 
 - **More real areas.** The pipeline exists and one area is imported, described
   under "The Map" above. What is not built is a second real area, any way to
   import one without running the tool by hand, or real hydrant locations: the
   twelve on the Windsor map are invented and the game says so wherever it
   offers that map.
-- **Traffic and signals.** Moving traffic, working traffic signals, and later
-  upgrades that improve how traffic yields to the engine.
+- **Upgrades that change how traffic behaves.** A better siren, a longer
+  perceive distance, fewer flawed drivers: the vocabulary exists but no upgrade
+  buys any of it. The only purchase in the game is still the tank.
 - **Pedestrians.** People walking the neighbourhood, on the sidewalks and
   across the streets. None exist in this build; nothing walks anywhere. The
   reason it matters to write down now is that it changes a rule that is

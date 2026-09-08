@@ -47,7 +47,6 @@ yourself. All of that is already in the project files.
 - **D** or **Right Arrow**: steer right
 - **Space**: handbrake, a stronger brake
 - **Q**: toggle the siren and lights
-- **Left Mouse Button**: spray water at wherever the cursor is
 - **M**: turn the minimap in the bottom right corner off and on
 - **N**: zoom the minimap, through three levels. This changes the minimap only
   and never moves the game camera. The button in the minimap's own corner does
@@ -61,11 +60,15 @@ yourself. All of that is already in the project files.
 
 ## A Few Things Worth Knowing
 
-- Water is spent whether or not the stream connects, so aiming matters. When the
-  stream is actually taking health off the fire it flashes into white steam, the
-  flames start going out, and the HUD says "Knocking it down". Plain water and no
-  line means you are missing.
-- A wall between the nozzle and the fire blocks the stream.
+- **The turret is automatic. There is no aim and no spray key.** Get the engine
+  within reach of the fire with a clear line to it and the turret swings round
+  and opens up on its own. Out of reach, or with a wall between the nozzle and
+  the fire, it holds where it is and shuts off. Water is spent only while it is
+  going into a fire, so a shot that cannot land costs you nothing.
+- When the stream is taking health off the fire it flashes into white steam, the
+  flames go out one at a time, and the HUD says "Knocking it down".
+- Where you park is the whole of the shot. The stream reaches one road width, so
+  the middle of the street works and the far kerb does not.
 - Roads and sidewalks are where you can drive. Mounting the kerb is allowed and
   costs nothing. Garden fences and houses are not: the fence line, not the kerb,
   is where the engine stops.
