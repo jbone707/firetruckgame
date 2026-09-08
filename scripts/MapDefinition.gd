@@ -74,6 +74,16 @@ const SCHEMA_VERSION: int = 3
 
 ## Each entry: {id: String, polygon: PackedVector2Array,
 ## body_color: Color, roof_color: Color, source: String, osm_id: String}.
+##
+## "body_color" and "roof_color" ARE NO LONGER READ (Milestone 6 Part 1).
+## MapBuilder picks one roof tone from its own shared palette, from the
+## building's "id", and derives the outline, the ridge and the eave shadow from
+## that. The two fields were written by two different generators from two
+## different palettes, which is why the fictional map and the imported one did
+## not look like the same game, and why a street could carry a purple roof next
+## to a red one. They are kept rather than removed for the same reason "blocks"
+## below is: dropping them means a schema version, a regenerated Windsor import
+## and a migration, for a field nothing reads.
 @export var buildings: Array[Dictionary] = []
 
 ## The land between the roads. Each entry: {id: String, rect: Rect2,

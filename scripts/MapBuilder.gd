@@ -63,9 +63,116 @@ const DASH_GAP: float = 32.0
 ## and does not clear a house. Without that split, filling the land in would
 ## have made every fire unreachable from the street it faces.
 const LOT_LAYER: int = 0b10000  # layer 5, world_lot
-const ROOF_INSET_SCALE: float = 0.62
 const WALL_THICKNESS: float = 40.0
+
+# ---------------------------------------------------------------------------
+# Buildings (Milestone 6 Part 1)
+# ---------------------------------------------------------------------------
+
+## Roof tones. Five muted, related colours: warm grey, slate, terracotta, olive
+## and taupe. Nothing saturated, nothing primary, and every pair of them sits
+## happily side by side, because a street is 30 houses seen at once and any one
+## loud roof on it is the only thing the eye goes to.
+##
+## This replaces the per-map colour pairs in the resources. Those were drawn
+## from different palettes by MapDefinition and by tools/import_osm.gd, so the
+## fictional map and the imported one did not look like the same game, and both
+## picked from saturated primaries. The "body_color" and "roof_color" fields
+## are still written into the resources and are simply no longer read, exactly
+## as MapDefinition.blocks is: removing them means a schema version and a
+## regenerated Windsor import for no gain today.
+const ROOF_PALETTE: Array = [
+	Color(0.52, 0.50, 0.46), # warm grey
+	Color(0.40, 0.44, 0.50), # slate
+	Color(0.56, 0.40, 0.33), # terracotta
+	Color(0.45, 0.47, 0.36), # olive
+	Color(0.49, 0.43, 0.37), # taupe
+]
+
+## How much darker than its roof a building's outline and its ridge are drawn.
+## Both come from the roof colour rather than from a constant so a slate house
+## is outlined in slate and a terracotta one in terracotta: one shared outline
+## colour is what makes a row of houses read as stickers on the grass.
+const ROOF_OUTLINE_DARKEN: float = 0.62
+const ROOF_RIDGE_DARKEN: float = 0.80
+const ROOF_OUTLINE_WIDTH: float = 3.0
+const ROOF_RIDGE_WIDTH: float = 3.0
+
+## How far the ridge stops short of each end of the roof, as a fraction of the
+## roof's length along its own longest axis. A ridge drawn wall to wall reads as
+## the roof being cut in half.
+const RIDGE_END_INSET: float = 0.16
+
+## The eave shadow: the footprint drawn once in a translucent dark tone, offset
+## by this much, so a band of it shows on the two sides away from the light and
+## nothing at all on the two sides facing it. The light is treated as coming
+## from the north west on every map, so the band falls south and east.
+##
+## This is what replaced the old renderer's ring. That ring was the building
+## BODY polygon with the roof inset to 62% of it drawn on top, which at this
+## scale put a 30-unit beige band right around every house in a colour unrelated
+## to its roof: it read as a doubled outline rather than as a wall.
+const EAVE_SHADOW_OFFSET: Vector2 = Vector2(5.0, 5.0)
+const EAVE_SHADOW_COLOR: Color = Color(0.08, 0.07, 0.06, 0.32)
+
+## Driveways: a strip of concrete from the house to the sidewalk in front of it.
+## Drawn only where the house genuinely fronts the street, which is what the gap
+## threshold decides. 260 units is a little under three truck lengths of front
+## garden; past that the house is not on that road in any sense a driveway would
+## express, and drawing one would just paint a path across a back garden.
+const DRIVEWAY_WIDTH: float = 46.0
+const DRIVEWAY_MIN_GAP: float = 50.0
+const DRIVEWAY_MAX_GAP: float = 260.0
+const DRIVEWAY_COLOR: Color = Color(0.67, 0.66, 0.62)
+
+## How far out from a house other footprints are considered when checking that
+## its driveway does not run through a neighbour. The strip is at most
+## DRIVEWAY_MAX_GAP long and a house is at most a few hundred units across, so
+## anything further away than this cannot be in the way.
+const DRIVEWAY_CLEARANCE_RADIUS: float = 600.0
+
+# ---------------------------------------------------------------------------
+# Street labels (Milestone 6 Part 2)
+# ---------------------------------------------------------------------------
+
 const LABEL_COLOR: Color = Color(0.95, 0.95, 0.90)
+const LABEL_OUTLINE_COLOR: Color = Color(0.06, 0.05, 0.05)
+const LABEL_FONT_SIZE: int = 34
+const LABEL_OUTLINE_SIZE: int = 6
+
+## Roughly how wide one character of the label font is, world units, at
+## LABEL_FONT_SIZE. Used only to decide whether a segment is long enough to
+## carry its own name; the drawing centres the text on the font's own
+## measurement, so this is an estimate and is allowed to be one. Measured from
+## the rendered label rather than assumed: the default font at size 34 averages
+## a little over 18 units per character on these street names.
+##
+## The size itself is set against the ROAD rather than against the screen: a 280
+## unit road carries text about an eighth of its width, which stays legible at
+## every zoom in GameBalance.camera_zoom_levels. The first draft used 15, which
+## is a sensible size for a HUD and is unreadably small painted on a road.
+const LABEL_CHAR_WIDTH: float = 18.5
+
+## Clear road either side of the text before a segment may carry a label, world
+## units. A name that runs to within a few units of a junction reads as
+## belonging to the junction rather than to the street.
+const LABEL_END_MARGIN: float = 100.0
+
+## How far off the centreline the text sits, world units. Enough that it clears
+## the dashes rather than sitting on them, and well inside a 280 unit road.
+const LABEL_CENTRELINE_OFFSET: float = 52.0
+
+## A street longer than this carries a second label, so a long road is named
+## again rather than the player driving a screen and a half without ever seeing
+## what they are on. Two screen widths at the widest zoom the game offers.
+const LABEL_REPEAT_LENGTH: float = 2600.0
+
+## How far apart a street's two labels must be, world units, or the second one
+## is not worth drawing. The first draft put both on the longest segment, at a
+## third and two thirds of it; on the imported map the longest straight run of a
+## long street is a few hundred units, so the two names landed a hundred units
+## apart and read as one name printed twice. About a screen width.
+const LABEL_MIN_SEPARATION: float = 1200.0
 
 ## Draw order, bottom to top. Every drawn node sets exactly one of these.
 ##
@@ -78,12 +185,14 @@ const Z_SIDEWALK: int = 0
 const Z_ROAD: int = 1
 const Z_ROAD_MARKING: int = 2
 const Z_YARD: int = 3
-const Z_KERB: int = 4
-const Z_FENCE: int = 5
-const Z_BUILDING_BODY: int = 6
-const Z_BUILDING_ROOF: int = 7
-const Z_LABEL: int = 8
-const Z_MARKER: int = 9  # reserved: nothing draws at this level today
+const Z_DRIVEWAY: int = 4
+const Z_KERB: int = 5
+const Z_FENCE: int = 6
+const Z_BUILDING_SHADOW: int = 7
+const Z_BUILDING_ROOF: int = 8
+const Z_BUILDING_EDGE: int = 9
+const Z_LABEL: int = 10
+const Z_MARKER: int = 11  # reserved: nothing draws at this level today
 
 var _definition: MapDefinition = null
 var _graph: RoadGraph = null
@@ -133,6 +242,10 @@ func build(definition: MapDefinition) -> void:
 
 	_build_lots(blocks_root, bounds)
 	_build_kerbs(blocks_root, bounds)
+
+	# Driveways before the houses, so a strip that turned out to be wrong is
+	# visibly wrong on the grass rather than hidden under a roof.
+	_build_driveways(blocks_root)
 
 	for building in definition.buildings:
 		_build_building(buildings_root, building)
@@ -310,37 +423,155 @@ static func _blocked(from: Vector2, to: Vector2, blockers: Array[Dictionary]) ->
 	return false
 
 
+## The street names, painted on the asphalt along the road they name.
+##
+## The placement is decided by street_label_placements below, which is a pure
+## function of the road list and is what the unit suite checks. This does the
+## drawing only: a Label centred on the point it was given, rotated to the
+## road, with an outline dark enough to read against the asphalt.
+##
+## The text is centred using the font's OWN measurement of it rather than the
+## estimate the placement rule uses, which is why the two are separate: the rule
+## has to be answerable without a font, and the drawing has one to hand.
+func _build_road_labels(parent: Node2D) -> void:
+	for placement in street_label_placements(_definition.roads):
+		var label := Label.new()
+		label.name = "Label_%s_%d" % [String(placement["road_id"]), int(placement["index"])]
+		label.text = String(placement["text"])
+		label.add_theme_color_override("font_color", LABEL_COLOR)
+		label.add_theme_color_override("font_outline_color", LABEL_OUTLINE_COLOR)
+		label.add_theme_constant_override("outline_size", LABEL_OUTLINE_SIZE)
+		label.add_theme_font_size_override("font_size", LABEL_FONT_SIZE)
+		label.z_index = Z_LABEL
+
+		label.size = label.get_combined_minimum_size()
+		label.pivot_offset = label.size / 2.0
+		label.position = Vector2(placement["position"]) - label.size / 2.0
+		label.rotation = float(placement["rotation"])
+		parent.add_child(label)
+
+
+## Where every street name goes, as {text, position, rotation, road_id, index}.
+##
 ## One label per street NAME, not per road. An imported street arrives as
 ## several ways split at its junctions, and labelling each of them would print
-## "Shadetree Drive" five times down one street. The longest piece carries it.
-func _build_road_labels(parent: Node2D) -> void:
-	var longest: Dictionary = {}
-	for road in _definition.roads:
+## "Shadetree Drive" five times down one street.
+##
+## The label sits on the ASPHALT, on the midpoint of that street's longest
+## straight SEGMENT, turned to the road and pushed just off the centreline so it
+## clears the dashes. Before Milestone 6 Part 2 it sat horizontally on the
+## sidewalk beside the road's midpoint, which on a bending road put the name
+## somewhere out on the kerb reading across the street it named rather than
+## along it. Choosing the longest straight segment, rather than the point half
+## way along the road, is what makes the rotation mean something: half way along
+## a road can land on a bend, where there is no one direction to turn to.
+##
+## Rotation is always in (-90, 90] degrees, so text never reads upside down. A
+## segment pointing west gives the same line as one pointing east, turned round.
+##
+## A street too short to carry its name gets nothing, rather than a name
+## overhanging both junctions. A street long enough to run off the screen twice
+## gets a second label, so the player is told what they are on again rather than
+## driving a screen and a half without being told.
+##
+## Unnamed ways get nothing, and so do slip roads: tools/import_osm.gd already
+## drops the name from anything whose highway tag ends in "_link", because a
+## slip road carries the name of the road it joins and labelling it would print
+## that name somewhere it does not belong. Nothing here has to know about links;
+## they simply arrive nameless.
+static func street_label_placements(roads: Array[Dictionary]) -> Array[Dictionary]:
+	# name -> {segments: Array of {a, b, length, road_id}, total_length}
+	var streets: Dictionary = {}
+	for road in roads:
 		var road_name: String = String(road.get("name", "")).strip_edges()
 		if road_name == "":
 			continue
-		var length: float = _polyline_length(road["points"])
-		if not longest.has(road_name) or length > float(longest[road_name]["length"]):
-			longest[road_name] = {"length": length, "road": road}
+		var points: PackedVector2Array = road["points"]
+		if not streets.has(road_name):
+			streets[road_name] = {"segments": [], "total_length": 0.0}
+		var street: Dictionary = streets[road_name]
+		street["total_length"] = float(street["total_length"]) + _polyline_length(points)
+		for i in range(points.size() - 1):
+			var length: float = points[i].distance_to(points[i + 1])
+			if length <= 0.0:
+				continue
+			street["segments"].append({
+				"a": points[i],
+				"b": points[i + 1],
+				"length": length,
+				"road_id": String(road.get("id", "")),
+			})
 
-	for road_name in longest:
-		var road: Dictionary = longest[road_name]["road"]
-		var placement: Dictionary = _polyline_midpoint(road["points"])
-		var direction: Vector2 = placement["direction"]
-		var perpendicular := Vector2(-direction.y, direction.x)
+	var placements: Array[Dictionary] = []
+	var names: Array = streets.keys()
+	names.sort()
+	for road_name in names:
+		var street: Dictionary = streets[road_name]
+		var needed: float = String(road_name).length() * LABEL_CHAR_WIDTH + LABEL_END_MARGIN * 2.0
 
-		var label := Label.new()
-		label.name = "Label_%s" % String(road["id"])
-		label.text = String(road_name)
-		label.add_theme_color_override("font_color", LABEL_COLOR)
-		label.add_theme_font_size_override("font_size", 14)
-		label.z_index = Z_LABEL
-		var offset: float = float(road["width"]) / 2.0 + SIDEWALK_WIDTH + 8.0
-		label.position = (
-			Vector2(placement["position"]) + perpendicular * offset
-			- Vector2(String(road_name).length() * 3.5, 8.0)
-		)
-		parent.add_child(label)
+		# Longest first, so the street's best stretch carries its name and the
+		# second label, if there is one, gets the best stretch left.
+		var segments: Array = street["segments"].duplicate()
+		segments.sort_custom(func(x, y): return float(x["length"]) > float(y["length"]))
+
+		var wanted: int = 2 if float(street["total_length"]) > LABEL_REPEAT_LENGTH else 1
+		var placed: Array[Vector2] = []
+
+		for segment in segments:
+			if placed.size() >= wanted:
+				break
+			var length: float = float(segment["length"])
+			if length < needed:
+				# Sorted longest first, so nothing after this one fits either.
+				break
+			var direction: Vector2 = (Vector2(segment["b"]) - Vector2(segment["a"])) / length
+			var rotation: float = readable_rotation(direction.angle())
+			# Off the centreline in the TEXT's own frame, so the name always
+			# sits on the same side of the dashes as the reader sees it,
+			# whichever way round the segment happened to be stored.
+			var offset: Vector2 = Vector2(0.0, -LABEL_CENTRELINE_OFFSET).rotated(rotation)
+
+			# Where on this segment the labels would go: one in the middle, or
+			# a third and two thirds along when this is the only segment long
+			# enough to carry both.
+			var alongs: Array[float] = [length / 2.0]
+			if (
+				placed.is_empty() and wanted == 2 and segments.size() == 1
+				and length >= needed * 2.0 and length / 3.0 >= LABEL_MIN_SEPARATION
+			):
+				alongs = [length / 3.0, length * 2.0 / 3.0]
+
+			for along in alongs:
+				if placed.size() >= wanted:
+					break
+				var position: Vector2 = Vector2(segment["a"]) + direction * along + offset
+				var too_close: bool = false
+				for existing in placed:
+					if existing.distance_to(position) < LABEL_MIN_SEPARATION:
+						too_close = true
+						break
+				if too_close:
+					continue
+				placements.append({
+					"text": String(road_name),
+					"position": position,
+					"rotation": rotation,
+					"road_id": String(segment["road_id"]),
+					"index": placed.size(),
+				})
+				placed.append(position)
+	return placements
+
+
+## An angle turned into the one that reads the right way up: anything pointing
+## into the left half of the compass is flipped by 180 degrees, which draws the
+## same line with the text running the other way. The result is always in
+## (-90, 90] degrees.
+static func readable_rotation(angle: float) -> float:
+	var wrapped: float = wrapf(angle, -PI, PI)
+	if wrapped > PI / 2.0 or wrapped <= -PI / 2.0:
+		wrapped = wrapf(wrapped + PI, -PI, PI)
+	return wrapped
 
 
 static func _polyline_length(points: PackedVector2Array) -> float:
@@ -349,32 +580,6 @@ static func _polyline_length(points: PackedVector2Array) -> float:
 		total += points[i].distance_to(points[i + 1])
 	return total
 
-
-## The point half way ALONG a road, and the direction of the road there. The
-## straight-line midpoint of the two ends would sit off the road entirely on
-## anything that bends.
-static func _polyline_midpoint(points: PackedVector2Array) -> Dictionary:
-	var half: float = _polyline_length(points) / 2.0
-	var travelled: float = 0.0
-	for i in range(points.size() - 1):
-		var a: Vector2 = points[i]
-		var b: Vector2 = points[i + 1]
-		var length: float = a.distance_to(b)
-		if length <= 0.0:
-			continue
-		if travelled + length >= half:
-			var into: float = half - travelled
-			return {
-				"position": a + (b - a).normalized() * into,
-				"direction": (b - a).normalized(),
-			}
-		travelled += length
-	var last: Vector2 = points[points.size() - 1]
-	var first: Vector2 = points[0]
-	return {
-		"position": (first + last) / 2.0,
-		"direction": (last - first).normalized() if last != first else Vector2.RIGHT,
-	}
 
 
 # ---------------------------------------------------------------------------
@@ -462,27 +667,56 @@ static func _yard_color(centroid: Vector2) -> Color:
 # Buildings
 # ---------------------------------------------------------------------------
 
+## One house, seen from above: an eave shadow, a roof filled from the shared
+## palette, a ridge along its longest axis and an outline, all four colours
+## derived from the one palette entry the building's ID picks.
+##
+## Nothing here consults the incident candidates, and nothing should: a house
+## that is about to catch fire has to look exactly like its neighbours until it
+## is dispatched, or the player learns to read the map instead of the radio.
+## The dispatched call is marked by FireIncident and by nothing else.
 func _build_building(parent: Node2D, building: Dictionary) -> void:
 	var polygon: PackedVector2Array = building["polygon"]
-	var body_color: Color = building["body_color"]
-	var roof_color: Color = building["roof_color"]
+	if polygon.size() < 3:
+		return
+	var id: String = String(building["id"])
+	var roof_color: Color = roof_color_for(id)
 
-	var body := Polygon2D.new()
-	body.name = "Body_%s" % String(building["id"])
-	body.polygon = polygon
-	body.color = body_color
-	body.z_index = Z_BUILDING_BODY
-	parent.add_child(body)
+	var shadow := Polygon2D.new()
+	shadow.name = "Eave_%s" % id
+	shadow.polygon = _translated(polygon, EAVE_SHADOW_OFFSET)
+	shadow.color = EAVE_SHADOW_COLOR
+	shadow.z_index = Z_BUILDING_SHADOW
+	parent.add_child(shadow)
 
 	var roof := Polygon2D.new()
-	roof.name = "Roof_%s" % String(building["id"])
-	roof.polygon = _inset_polygon(polygon, ROOF_INSET_SCALE)
+	roof.name = "Roof_%s" % id
+	roof.polygon = polygon
 	roof.color = roof_color
 	roof.z_index = Z_BUILDING_ROOF
 	parent.add_child(roof)
 
+	var outline := Line2D.new()
+	outline.name = "Outline_%s" % id
+	outline.points = polygon
+	outline.closed = true
+	outline.width = ROOF_OUTLINE_WIDTH
+	outline.default_color = roof_color.darkened(1.0 - ROOF_OUTLINE_DARKEN)
+	outline.z_index = Z_BUILDING_EDGE
+	parent.add_child(outline)
+
+	var ridge_points: PackedVector2Array = ridge_line(polygon)
+	if ridge_points.size() == 2:
+		var ridge := Line2D.new()
+		ridge.name = "Ridge_%s" % id
+		ridge.points = ridge_points
+		ridge.width = ROOF_RIDGE_WIDTH
+		ridge.default_color = roof_color.darkened(1.0 - ROOF_RIDGE_DARKEN)
+		ridge.z_index = Z_BUILDING_EDGE
+		parent.add_child(ridge)
+
 	var static_body := StaticBody2D.new()
-	static_body.name = "Collision_%s" % String(building["id"])
+	static_body.name = "Collision_%s" % id
 	static_body.collision_layer = 1
 	static_body.collision_mask = 0
 	var shape := CollisionPolygon2D.new()
@@ -491,14 +725,191 @@ func _build_building(parent: Node2D, building: Dictionary) -> void:
 	parent.add_child(static_body)
 
 
-func _inset_polygon(polygon: PackedVector2Array, scale: float) -> PackedVector2Array:
-	if polygon.size() == 0:
-		return polygon
-	var centroid: Vector2 = MapGeometry.polygon_centroid(polygon)
-	var inset := PackedVector2Array()
-	for p in polygon:
-		inset.append(centroid + (p - centroid) * scale)
-	return inset
+## The roof colour for a building, from its ID alone. Deterministic across runs
+## and across machines, which is why it hashes the ID itself rather than seeding
+## a RandomNumberGenerator: two players on the same map see the same street.
+static func roof_color_for(building_id: String) -> Color:
+	return ROOF_PALETTE[stable_hash(building_id) % ROOF_PALETTE.size()]
+
+
+## FNV-1a over the ID's bytes, masked to 32 bits. String.hash() would do as
+## well today, but it is an engine implementation detail and this is not: the
+## houses must not change colour because Godot changed its hash.
+static func stable_hash(text: String) -> int:
+	var value: int = 2166136261
+	for byte in text.to_utf8_buffer():
+		value = (value ^ int(byte)) & 0xFFFFFFFF
+		value = (value * 16777619) & 0xFFFFFFFF
+	return value
+
+
+## The roof ridge: a line through the middle of the footprint along its longest
+## axis, stopping short of both ends.
+##
+## The axis is taken from the footprint's own longest EDGE rather than from the
+## world axes, so a house standing at 20 degrees to the street gets a ridge at
+## 20 degrees too. An imported footprint is rarely a clean rectangle, so the
+## extent is measured by projecting every vertex onto that axis instead of
+## assuming the longest edge spans the building.
+static func ridge_line(polygon: PackedVector2Array) -> PackedVector2Array:
+	if polygon.size() < 3:
+		return PackedVector2Array()
+
+	var axis: Vector2 = Vector2.ZERO
+	var longest: float = 0.0
+	for i in range(polygon.size()):
+		var edge: Vector2 = polygon[(i + 1) % polygon.size()] - polygon[i]
+		if edge.length() > longest:
+			longest = edge.length()
+			axis = edge.normalized()
+	if axis == Vector2.ZERO:
+		return PackedVector2Array()
+
+	var centre: Vector2 = MapGeometry.polygon_centroid(polygon)
+	var low: float = INF
+	var high: float = -INF
+	for point in polygon:
+		var along: float = (point - centre).dot(axis)
+		low = minf(low, along)
+		high = maxf(high, along)
+
+	var inset: float = (high - low) * RIDGE_END_INSET
+	if high - low - inset * 2.0 <= 1.0:
+		return PackedVector2Array()
+	return PackedVector2Array([
+		centre + axis * (low + inset), centre + axis * (high - inset),
+	])
+
+
+static func _translated(polygon: PackedVector2Array, offset: Vector2) -> PackedVector2Array:
+	var moved := PackedVector2Array()
+	for point in polygon:
+		moved.append(point + offset)
+	return moved
+
+
+# ---------------------------------------------------------------------------
+# Driveways
+# ---------------------------------------------------------------------------
+
+## A short strip of concrete from each house that fronts a street out to the
+## sidewalk in front of it. Drawn under the fence, so it reads as a drive up to
+## a gate rather than as a path that has knocked the fence down.
+##
+## Skipped whenever the house does not really front that road (the gap to the
+## sidewalk is over DRIVEWAY_MAX_GAP) or whenever the strip would run through
+## another house, which happens where two rows back onto one another and the
+## nearest road to a back garden is the next street over.
+func _build_driveways(parent: Node2D) -> void:
+	var footprints: Array[PackedVector2Array] = []
+	var centroids: Array[Vector2] = []
+	for building in _definition.buildings:
+		footprints.append(building["polygon"])
+		centroids.append(MapGeometry.polygon_centroid(building["polygon"]))
+
+	for index in range(_definition.buildings.size()):
+		var strip: PackedVector2Array = _driveway_strip(footprints[index], centroids[index])
+		if strip.is_empty():
+			continue
+		if _crosses_another_footprint(strip, footprints, centroids, index):
+			continue
+		var drive := Polygon2D.new()
+		drive.name = "Driveway_%s" % String(_definition.buildings[index]["id"])
+		drive.polygon = strip
+		drive.color = DRIVEWAY_COLOR
+		drive.z_index = Z_DRIVEWAY
+		parent.add_child(drive)
+
+
+## The strip from a footprint to the sidewalk edge of the road nearest it, or an
+## empty array when there should not be one.
+##
+## The strip runs SQUARE TO THE ROAD, from the fence line straight in to the
+## wall it meets. The first draft ran it to the nearest point of the footprint
+## instead, which on a real import is nearly always a corner, so every drive
+## came off the house at its own angle and each one read as a paving slab
+## dropped on the lawn rather than as a drive. Where the perpendicular misses
+## the house altogether the house does not front that road square on, and gets
+## nothing.
+func _driveway_strip(polygon: PackedVector2Array, centroid: Vector2) -> PackedVector2Array:
+	var nearest: Dictionary = _nearest_road_point(centroid)
+	if nearest.is_empty():
+		return PackedVector2Array()
+
+	var outward: Vector2 = (centroid - Vector2(nearest["point"])).normalized()
+	if outward == Vector2.ZERO:
+		return PackedVector2Array()
+	# The sidewalk's outer edge on the house's side of the road: this is where
+	# the drivable surface stops and the fence line runs.
+	var kerb_point: Vector2 = (
+		Vector2(nearest["point"]) + outward * (float(nearest["width"]) / 2.0 + SIDEWALK_WIDTH)
+	)
+
+	var wall_point: Vector2 = _first_crossing(polygon, kerb_point, centroid)
+	if wall_point == kerb_point:
+		return PackedVector2Array()
+	var gap: float = wall_point.distance_to(kerb_point)
+	# A strip shorter than it is wide is a square of concrete, not a drive.
+	if gap < DRIVEWAY_MIN_GAP or gap > DRIVEWAY_MAX_GAP:
+		return PackedVector2Array()
+	# Run a little INTO the house so the strip meets the wall rather than
+	# stopping a hair short of it and leaving a line of grass between them.
+	var into_house: Vector2 = wall_point + (wall_point - kerb_point).normalized() * 6.0
+	return MapGeometry.oriented_slab(into_house, kerb_point, DRIVEWAY_WIDTH)
+
+
+## Where the segment from "from" to "to" first crosses the polygon's boundary,
+## or "from" itself when it never does.
+static func _first_crossing(
+	polygon: PackedVector2Array, from: Vector2, to: Vector2
+) -> Vector2:
+	var best: Vector2 = from
+	var best_distance: float = INF
+	for i in range(polygon.size()):
+		var hit = Geometry2D.segment_intersects_segment(
+			from, to, polygon[i], polygon[(i + 1) % polygon.size()]
+		)
+		if hit == null:
+			continue
+		var distance: float = Vector2(hit).distance_to(from)
+		if distance < best_distance:
+			best_distance = distance
+			best = hit
+	return best
+
+
+func _crosses_another_footprint(
+	strip: PackedVector2Array,
+	footprints: Array[PackedVector2Array],
+	centroids: Array[Vector2],
+	skip: int
+) -> bool:
+	var here: Vector2 = centroids[skip]
+	for other in range(footprints.size()):
+		if other == skip:
+			continue
+		if centroids[other].distance_to(here) > DRIVEWAY_CLEARANCE_RADIUS:
+			continue
+		if not Geometry2D.intersect_polygons(strip, footprints[other]).is_empty():
+			return true
+	return false
+
+
+## The closest point on the road network's centrelines to a point, with the
+## width of the road it is on. Empty when there are no roads at all.
+func _nearest_road_point(point: Vector2) -> Dictionary:
+	var best: Dictionary = {}
+	var best_distance: float = INF
+	for edge in _graph.edges:
+		var a: Vector2 = _graph.positions[int(edge["a"])]
+		var b: Vector2 = _graph.positions[int(edge["b"])]
+		var candidate: Vector2 = Geometry2D.get_closest_point_to_segment(point, a, b)
+		var distance: float = candidate.distance_to(point)
+		if distance < best_distance:
+			best_distance = distance
+			best = {"point": candidate, "width": float(edge["width"])}
+	return best
+
 
 
 # ---------------------------------------------------------------------------
