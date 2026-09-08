@@ -202,6 +202,54 @@ unit suite ask the question the validator cannot: every junction arm on both
 maps is asphalt just inside the kerb, and no piece of either region sits inside
 the road anywhere.
 
+### How a house looks, and how a street is named
+
+One renderer draws every building on every map, so Elm Grove and Windsor look
+like the same game. A house is a roof filled from a fixed palette of five muted,
+related tones (warm grey, slate, terracotta, olive, taupe), a ridge along the
+footprint's longest axis, a thin outline, and an eave shadow on the two sides
+away from the light. The tone is chosen by hashing the building's own stable id,
+so it is the same on every machine and every run, and never a saturated primary:
+a street is thirty houses seen at once and any one loud roof on it is the only
+thing the eye goes to. A house that fronts a street also gets a driveway, a
+short strip of concrete running square to the road from the fence line in to the
+wall, skipped where the house does not really front that road or where the strip
+would run through a neighbour. The map data no longer decides what a house looks
+like; `body_color` and `roof_color` are still written into both resources and
+are no longer read.
+
+A building that is about to catch fire looks exactly like its neighbours until
+it is dispatched. The active call is marked by `FireIncident` and by nothing
+else, so the player reads the radio rather than the map.
+
+Street names are painted on the asphalt, along the road. Each name sits on the
+middle of that street's longest straight segment, just off the centreline so it
+clears the dashes, turned to the segment and flipped where it would otherwise
+read upside down, so every label's rotation is in (-90, 90]. One label per
+street NAME, not per way, because an imported street arrives as several ways
+split at its junctions. A segment too short for its name carries nothing rather
+than a name overhanging both junctions; a street over about two screen widths
+long is named twice, on two segments at least a screen width apart. Unnamed ways
+and slip roads get nothing.
+
+### The camera, and the first call of a shift
+
+The camera is north up and follows the truck, leading it a little at speed and
+clamped so the player never sees past the map's edge. **How far it is zoomed out
+is not settled.** `GameBalance.camera_zoom_levels` holds three levels and a
+development key, Z, cycles them during play so James can pick the one that feels
+like the area he selected by looking at it rather than having a number guessed
+for him. The default is still the original 0.9 and does not change until he
+chooses. The lead and the impact shake scale with whatever level is in use,
+because both are written as world distances but are meant as fractions of the
+screen.
+
+The first call of a shift must be at least `first_call_min_route` route units
+from the station, along the roads. It is the one call the player has no warm-up
+for, arriving the instant the shift starts from a standing start, and a
+candidate a few hundred units up the road is over before the radio line has been
+read. Every later call keeps the spacing the candidates were imported with.
+
 A map's layout is stored as data (`MapDefinition`, saved as a `.tres`)
 separately from the code that draws and simulates it (`MapBuilder`): road
 centrelines and widths, building polygons, station spawn, hydrant locations and
@@ -220,10 +268,11 @@ results screen, the shop and the save file. Earlier drafts of this document
 called parts of it scaffolding, which was true when they were written and is not
 true now.
 
-Two things described above rest on judgement no automated check can make, so they
-are on James's playtest list rather than claimed here: how the truck FEELS to
-drive, and whether the fire effects stay readable in motion. The six item manual
-checklist is in `DEVELOPMENT_STATUS.md`.
+Three things described above rest on judgement no automated check can make, so
+they are on James's playtest list rather than claimed here: how the truck FEELS
+to drive, whether the fire effects stay readable in motion, and which of the
+three camera zoom levels feels like the area he selected. The manual checklist
+is in `DEVELOPMENT_STATUS.md`.
 
 ## Future, Not Implemented
 
