@@ -265,6 +265,11 @@ const Z_MARKER: int = 12  # reserved: nothing draws at this level today
 
 var _definition: MapDefinition = null
 var _graph: RoadGraph = null
+
+## The lane model derived from that graph at load (Milestone 9 Part 1). Never
+## stored in the map file: a lane is a derived fact about a road, and a map
+## carrying its own lanes is a map that can disagree with its own roads.
+var _lane_graph: LaneGraph = null
 var _lot_region: Array[PackedVector2Array] = []
 var _kerb_region: Array[PackedVector2Array] = []
 
@@ -276,6 +281,7 @@ func build(definition: MapDefinition) -> void:
 		child.queue_free()
 
 	_graph = RoadGraph.build(definition)
+	_lane_graph = LaneGraph.build(_graph, definition)
 
 	var bounds: Rect2 = definition.world_bounds
 	var slabs: Array[PackedVector2Array] = MapGeometry.road_slabs(_graph)
@@ -351,6 +357,10 @@ func get_world_bounds() -> Rect2:
 ## away a fire is once the roads stop being a grid.
 func get_road_graph() -> RoadGraph:
 	return _graph
+
+
+func get_lane_graph() -> LaneGraph:
+	return _lane_graph
 
 
 func get_hydrant_definitions() -> Array[Dictionary]:
