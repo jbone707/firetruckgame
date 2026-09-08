@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/Truck.tscn" id="2_truck"]
@@ -8,6 +8,7 @@
 [ext_resource type="Script" path="res://scripts/DispatchManager.gd" id="6_dispatch"]
 [ext_resource type="Script" path="res://scripts/GameSession.gd" id="7_session"]
 [ext_resource type="Script" path="res://scripts/GameUI.gd" id="8_ui"]
+[ext_resource type="Script" path="res://scripts/TrafficSignals.gd" id="9_signals"]
 
 [node name="Main" type="Node2D"]
 process_mode = 3
@@ -17,6 +18,12 @@ script = ExtResource("1_main")
 unique_name_in_owner = true
 process_mode = 1
 script = ExtResource("4_map")
+
+[node name="TrafficSignals" type="Node2D" parent="."]
+unique_name_in_owner = true
+process_mode = 1
+z_index = 2
+script = ExtResource("9_signals")
 
 [node name="Hydrants" type="Node2D" parent="."]
 unique_name_in_owner = true

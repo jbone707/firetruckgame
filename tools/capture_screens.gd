@@ -808,6 +808,9 @@ func _group_world_closeups() -> void:
 		camera.set_zoom_level(1.3)
 		await _shot("29_street_label")
 
+	# 37 to 39: what stands at a controlled junction on Windsor.
+	await _controlled_junction_shots("37_windsor")
+
 	# 27: the same junction shot, on Elm Grove.
 	main.load_map(ELM_GROVE_MAP)
 	await physics_frame
@@ -821,6 +824,10 @@ func _group_world_closeups() -> void:
 		var junction_point: Vector2 = elm_grove_junction["point"]
 		await _place_truck(junction_point - Vector2.RIGHT.rotated(junction_heading) * 220.0, junction_heading)
 		await _shot("27_junction_elm_grove")
+
+	# 40: the same, on Elm Grove, whose whole grid is signalled and which
+	# therefore has no stop sign to shoot.
+	await _controlled_junction_shots("40_elm_grove")
 
 	main.load_map(WINDSOR_MAP)
 	await physics_frame
@@ -907,3 +914,71 @@ func _group_narrow() -> void:
 	await _shot("35_hud_narrow_960x540")
 
 	DisplayServer.window_set_size(DEFAULT_SIZE)
+
+
+## A junction the lane model gave the given control to, with the position and a
+## heading along one of its arms. Read from the built LaneGraph rather than
+## re-derived from the road list, so these shots are of the junctions the game
+## actually controls and not of ones that merely look like them.
+##
+## Prefers the junction with the most arms, so the signal shots land on a
+## crossroads with four heads rather than on a T with three.
+func _find_controlled_junction(control: int) -> Dictionary:
+	var lanes: LaneGraph = main._map_builder.get_lane_graph()
+	if lanes == null:
+		return {}
+	var best: Dictionary = {}
+	var best_arms: int = -1
+	for node in lanes.junctions:
+		var junction: Dictionary = lanes.junctions[node]
+		if int(junction["control"]) != control:
+			continue
+		if int(junction["arm_count"]) <= best_arms:
+			continue
+		best_arms = int(junction["arm_count"])
+		best = junction
+	if best.is_empty():
+		return {}
+	var arms: Array = best["arms"]
+	return {
+		"point": Vector2(best["position"]),
+		"heading": Vector2(arms[0]["heading"]).angle(),
+		"arms": best_arms,
+		"node": int(best["node"]),
+	}
+
+
+## The signal and stop-sign shots (Milestone 9 Part 2).
+##
+## Framed on the junction rather than on the truck, at BOTH the default zoom and
+## the widest one the game offers, because the question asked of these is whether
+## a head can be seen and read while driving, and the widest zoom is where that
+## stops being true if it is going to. The truck is parked back down one arm so
+## the shot has a driver's eye in it.
+func _controlled_junction_shots(prefix: String) -> void:
+	var signalled: Dictionary = _find_controlled_junction(LaneGraph.JunctionControl.SIGNAL)
+	if signalled.is_empty():
+		_skip("%s_signal" % prefix, "no signalled junction on this map")
+		_skip("%s_signal_wide" % prefix, "no signalled junction on this map")
+	else:
+		var point: Vector2 = signalled["point"]
+		var heading: float = signalled["heading"]
+		var back: Vector2 = Vector2.RIGHT.rotated(heading)
+		await _place_truck(point + back * 300.0, heading + PI)
+		await _frame_point(point, 0.9)
+		await _shot("%s_signal" % prefix)
+		await _frame_point(point, 0.55)
+		await _shot("%s_signal_wide" % prefix)
+		await _follow_truck_again(CLOSEUP_ZOOM)
+
+	var stopped: Dictionary = _find_controlled_junction(LaneGraph.JunctionControl.STOP)
+	if stopped.is_empty():
+		_skip("%s_stop_sign" % prefix, "no stop-sign junction on this map")
+	else:
+		var stop_point: Vector2 = stopped["point"]
+		var stop_heading: float = stopped["heading"]
+		var stop_back: Vector2 = Vector2.RIGHT.rotated(stop_heading)
+		await _place_truck(stop_point + stop_back * 300.0, stop_heading + PI)
+		await _frame_point(stop_point, 0.9)
+		await _shot("%s_stop_sign" % prefix)
+		await _follow_truck_again(CLOSEUP_ZOOM)

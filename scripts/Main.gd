@@ -12,6 +12,7 @@ extends Node2D
 @onready var _camera: FollowCamera = %Camera
 @onready var _pause_menu: PauseMenu = %PauseMenu
 @onready var _hydrants_root: Node2D = %Hydrants
+@onready var _signals: TrafficSignals = %TrafficSignals
 @onready var _incidents_root: Node2D = %Incidents
 @onready var _dispatch: DispatchManager = %Dispatch
 @onready var _session: GameSession = %Session
@@ -125,6 +126,10 @@ func load_map(path: String) -> void:
 	_dispatch.setup(
 		self, _map_builder.get_incident_candidates(), _routes_from_station()
 	)
+
+	# The signal heads and the stop signs, from the lane model the builder just
+	# derived. Rebuilt per map, like everything else the map owns.
+	_signals.configure(_map_builder.get_lane_graph())
 
 	# The minimap's static half is built once per map, here, from the same
 	# definition and the same hydrant list everything else on the map came from.
@@ -499,7 +504,14 @@ func _on_start_shift_pressed() -> void:
 	_shop_status = ""
 	_set_paused(false)
 	_session.start_shift()
+
+	# Everything per-run that has to start over. Here rather than on the
+	# session's PLAYING transition, because that transition does not fire when a
+	# shift starts from a shift that is already running, and here rather than on
+	# a particular button, because every way a player asks for a shift arrives at
+	# this one handler (handoff §9: starting a shift clears the old one).
 	_reset_hydrants()
+	_signals.reset_for_new_shift()
 	# start_shift puts the truck back at the station. Without this the camera
 	# glides there from wherever the last shift ended, which on a map 12,499
 	# units across is a long, uncontrollable pan over the player's first

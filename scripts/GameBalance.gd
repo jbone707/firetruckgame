@@ -272,6 +272,26 @@ var minimap_zoom_levels: Array[float] = [1.0, 2.0, 4.0] # invented default, not 
 
 
 # ---------------------------------------------------------------------------
+# Traffic signals (handoff §1: "working traffic signals, moving traffic")
+# ---------------------------------------------------------------------------
+
+## The fixed signal cycle, seconds. Opposing arms of a junction share a phase,
+## so a whole cycle is two of each of these: green, amber, then a moment with
+## every arm red before the other phase goes.
+##
+## Twelve seconds of green is long enough that arriving on a red is a wait a
+## player notices and short enough that it is never a wait they resent, and the
+## all-red is the ordinary American intergreen: it exists so a junction is never
+## green both ways for even a frame.
+##
+## NOTHING HERE EVER STOPS THE PLAYER. Signals govern traffic; the engine drives
+## through a red the way an engine does.
+var signal_green_time: float = 12.0 # invented default, not from handoff
+var signal_amber_time: float = 3.0 # invented default, not from handoff
+var signal_all_red_time: float = 1.0 # invented default, not from handoff
+
+
+# ---------------------------------------------------------------------------
 # Escalation travel allowance (handoff §5, sized in Milestone 4 Part 1)
 # ---------------------------------------------------------------------------
 

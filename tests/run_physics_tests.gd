@@ -93,6 +93,7 @@ func _run() -> void:
 	await _check_the_minimap_clears_the_prompt_line_and_the_hud_column()
 	await _check_the_minimap_toggle_holds_across_a_change_of_map()
 	await _check_the_minimap_zoom_never_moves_the_camera_zoom()
+	await _check_the_signals_run_pause_and_reset_with_the_shift()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -1374,7 +1375,7 @@ func _check_the_hud_rows_never_overlap() -> void:
 	var main: Node = world[0]
 	var ui: GameUI = main.get_node("GameUI")
 
-	main._session.start_shift()
+	main._on_start_shift_pressed()
 	await physics_frame
 
 	for size in [Vector2i(1280, 720), Vector2i(960, 540)]:
@@ -1725,7 +1726,7 @@ func _check_the_minimap_clears_the_prompt_line_and_the_hud_column() -> void:
 	var main: Node = world[0]
 	var ui: GameUI = main.get_node("GameUI")
 
-	main._session.start_shift()
+	main._on_start_shift_pressed()
 	await physics_frame
 
 	# The longest lines the game has. If a longer one is written later, this is
@@ -1882,7 +1883,7 @@ func _check_the_minimap_zoom_never_moves_the_camera_zoom() -> void:
 	var camera: Node = main.get_node("Camera")
 	var minimap: Minimap = ui.get_minimap()
 
-	main._session.start_shift()
+	main._on_start_shift_pressed()
 	await physics_frame
 
 	# Cycling the minimap leaves the camera exactly where it was.
@@ -1937,6 +1938,94 @@ func _check_the_minimap_zoom_never_moves_the_camera_zoom() -> void:
 	_check(
 		camera.zoom.is_equal_approx(camera_now),
 		"and still does not touch the camera (%s, was %s)" % [camera.zoom, camera_now]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## The signals run with the game, stop with it, and start every shift on the
+## same phase (Milestone 9 Part 2).
+##
+## The clock is the whole of the signal system's state, so these three
+## properties are the whole of its behaviour over time. The pause one is the
+## reason TrafficSignals is PROCESS_MODE_PAUSABLE in Main.tscn while Main itself
+## is ALWAYS: without saying so explicitly the node would inherit Main's mode,
+## run behind the pause menu, and jump a junction to a different phase while the
+## player was reading it.
+func _check_the_signals_run_pause_and_reset_with_the_shift() -> void:
+	var world: Array = await _make_world(WINDSOR_MAP)
+	var main: Node = world[0]
+	var signals: TrafficSignals = main.get_node("TrafficSignals")
+
+	_check(
+		signals.get_signal_count() == 6,
+		"Windsor builds its six signalled junctions in the real scene (%d)"
+			% signals.get_signal_count()
+	)
+	_check(
+		signals.get_stop_sign_count() == 14,
+		"and its fourteen stop signs (%d)" % signals.get_stop_sign_count()
+	)
+
+	main._on_start_shift_pressed()
+	await physics_frame
+	_check(
+		absf(signals.clock) < 0.2,
+		"a shift starts with every junction on the same phase (clock %.2f)" % signals.clock
+	)
+
+	# Running.
+	var before: float = signals.clock
+	for _frame in range(PHYSICS_FPS):
+		await physics_frame
+	var ran: float = signals.clock - before
+	_check(
+		ran > 0.5 and ran < 1.5,
+		"a second of play advances the cycle about a second (%.2f)" % ran
+	)
+
+	# Paused. The clock must not move at all.
+	# This runner IS the SceneTree, so its own "paused" is the game's pause.
+	paused = true
+	# A frame either side, so the check is of a whole second of real pause.
+	await physics_frame
+	var paused_at: float = signals.clock
+	for _frame in range(PHYSICS_FPS):
+		await physics_frame
+	_check(
+		absf(signals.clock - paused_at) < 0.001,
+		"and a second of pause advances it not at all (%.4f)" % (signals.clock - paused_at)
+	)
+	paused = false
+	await physics_frame
+
+	# Running again from where it stopped, not from where it would have been.
+	for _frame in range(PHYSICS_FPS / 2):
+		await physics_frame
+	_check(
+		signals.clock > paused_at,
+		"resuming carries on from the phase it was paused on (%.2f from %.2f)" % [
+			signals.clock, paused_at
+		]
+	)
+
+	# And the next shift starts the cycle over.
+	main._on_start_shift_pressed()
+	await physics_frame
+	_check(
+		absf(signals.clock) < 0.2,
+		"and the next shift starts the cycle again (clock %.2f)" % signals.clock
+	)
+
+	# Elm Grove's whole grid is signalled and it has no stop signs at all.
+	main.load_map(ELM_GROVE_MAP)
+	await physics_frame
+	_check(
+		signals.get_signal_count() == 16 and signals.get_stop_sign_count() == 0,
+		"Elm Grove's sixteen crossroads are all signalled, with no stop signs (%d, %d)" % [
+			signals.get_signal_count(), signals.get_stop_sign_count()
+		]
 	)
 
 	main.queue_free()
