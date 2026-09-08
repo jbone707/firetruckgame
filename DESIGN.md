@@ -113,10 +113,15 @@ reads as a street rather than as a line drawn on a field.
 
 ### Windsor test area, imported from OpenStreetMap
 
-The second map is built from OpenStreetMap data for a 500 by 380 metre box
-around Shadetree Drive and Smoketree Street in Windsor, California: 7,000 by
-5,320 units at 14 units per metre, 42 road segments with their real names, 19
-junctions, 19 dead ends and 237 real building footprints.
+The second map is built from OpenStreetMap data downloaded once for a 500 by 380
+metre box around Shadetree Drive and Smoketree Street in Windsor, California.
+The playable map covers 530 by 410 metres of that data: Overpass returns each
+matching way's complete geometry, so the file holds ground beyond the box it was
+asked for, and the map reaches 30 metres further north and east into it to bring
+two junctions inside that the box had cut in half. At 14 units per metre, plus a
+200 unit verge between the last road and the boundary wall, that is a world
+7,820 by 6,140 units holding 42 road segments with their real names, 20
+junctions, 18 dead ends and 261 real building footprints.
 
 **The roads are exaggerated and the land is not. That is the rule.** A road's
 drawn width comes from a table in world units, not from its real width in
@@ -234,21 +239,59 @@ and slip roads get nothing.
 
 ### The camera, and the first call of a shift
 
-The camera is north up and follows the truck, leading it a little at speed and
-clamped so the player never sees past the map's edge. **How far it is zoomed out
-is not settled.** `GameBalance.camera_zoom_levels` holds three levels and a
-development key, Z, cycles them during play so James can pick the one that feels
-like the area he selected by looking at it rather than having a number guessed
-for him. The default is still the original 0.9 and does not change until he
-chooses. The lead and the impact shake scale with whatever level is in use,
-because both are written as world distances but are meant as fractions of the
-screen.
+The camera is north up and follows the truck, leading it a little at speed.
+**Z cycles three zoom levels**, and all three are kept because all three are
+useful: one street, two streets, and about a third of the map. It began as a
+development key so the right number could be chosen by looking rather than
+guessed; the answer turned out to be that the player should choose, per moment,
+so it is a control. The level is kept for the rest of the session. The lead and
+the impact shake scale with whatever level is in use, because both are written
+as world distances but are meant as fractions of the screen.
 
 The first call of a shift must be at least `first_call_min_route` route units
 from the station, along the roads. It is the one call the player has no warm-up
 for, arriving the instant the shift starts from a standing start, and a
 candidate a few hundred units up the road is over before the radio line has been
 read. Every later call keeps the spacing the candidates were imported with.
+
+### One roof to a piece of ground
+
+No two buildings overlap. A house drawn on top of a house is the clearest
+possible sign that a map was generated rather than surveyed, and Windsor shipped
+with twelve of them: the importer decided a stretch of road frontage was empty
+by testing a single point in the middle of it, so a real house set back further
+or nearer than that one point was invisible and an invented lot went down on top
+of it. The invented lots now have to clear every real footprint, every other
+lot, every road and the map's own bounds by a margin, and are simply not placed
+where they cannot. `MapValidator` asks the finished map rather than trusting the
+generator.
+
+Where the two disagree, the real footprint wins and the invented one is dropped.
+An invented lot exists only so that an empty frontage does not read as waste
+ground, and it costs nothing to give up.
+
+### Where the map ends
+
+Two rules, because a map that stops has to stop honestly.
+
+**No junction sits on the boundary.** A junction cut in half by the edge of the
+box is half a turn the player can see and cannot take. Where the data has a
+junction just outside, the box is widened to bring it in, using geometry the
+extract already contains; where it cannot be brought in, the roads end and are
+marked as ending. Windsor's Shadetree Lane and Leafhaven Lane met 2.5 metres
+outside the downloaded box, which is exactly this defect.
+
+**No asphalt passes the wall.** The world is the geographic box plus a verge
+wide enough that no road slab can reach the boundary, so the truck never sees
+road drawn past the thing that stops it. Every road that reaches the verge ends
+in a striped barricade across the carriageway and an American dead end sign on
+the grass beyond it, turned to face the driver coming down that road. A
+cul-de-sac in the middle of the neighbourhood gets neither: it is a real place a
+real street ends, and barricading it would be a lie about the map's own edge.
+
+The camera may look half a screen past the world's bounds, so the truck is never
+pinned against the edge of the frame while driving at a wall, and the ground
+outside the map is drawn so that overscan shows ground rather than void.
 
 A map's layout is stored as data (`MapDefinition`, saved as a `.tres`)
 separately from the code that draws and simulates it (`MapBuilder`): road
@@ -268,11 +311,10 @@ results screen, the shop and the save file. Earlier drafts of this document
 called parts of it scaffolding, which was true when they were written and is not
 true now.
 
-Three things described above rest on judgement no automated check can make, so
+Two things described above rest on judgement no automated check can make, so
 they are on James's playtest list rather than claimed here: how the truck FEELS
-to drive, whether the fire effects stay readable in motion, and which of the
-three camera zoom levels feels like the area he selected. The manual checklist
-is in `DEVELOPMENT_STATUS.md`.
+to drive, and whether the fire effects stay readable in motion. The manual
+checklist is in `DEVELOPMENT_STATUS.md`.
 
 ## Future, Not Implemented
 

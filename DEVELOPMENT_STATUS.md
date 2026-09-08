@@ -7,25 +7,96 @@ executable with `--version`.
 
 ## Current File Inventory
 
-- `project.godot`: project configuration. Compatibility renderer, 1280x720
-  default viewport, `canvas_items` stretch mode with `expand` aspect, main
-  scene set to `scenes/Main.tscn`, `GameBalance` autoload, and every input
-  action from handoff §4.
-- `.gitignore`: ignores the `.godot/` import cache, `*.tmp` files, and
-  `export_presets.cfg`.
-- `README.md`: launch steps and controls for James.
-- `DESIGN.md`: what the game is and how it plays, with a "Future, not
-  implemented" section.
-- `DEVELOPMENT_STATUS.md`: this file.
-- `scripts/GameBalance.gd`: autoload singleton holding every tuning value
-  from handoff §4, §5, §6 and §3.
-- `scenes/Main.tscn` and `scripts/Main.gd`: placeholder main scene. Prints a
-  confirmation line and the running Godot version on `_ready()`. Nothing
-  else. Later parts replace this with the real Main/GameSession
-  orchestrator.
-- `scenes/`, `scripts/systems/`, `resources/`, `tests/`: empty folders for
-  later parts, each holding a `.gitkeep` placeholder so git tracks the
-  directory.
+Rewritten from the actual tree in Milestone 8 Part 4. It had said `Main.tscn`
+was a placeholder that printed a version line and nothing else, which stopped
+being true in Milestone 2 and had been carried, wrong, through six milestones.
+Line counts are given because they are the honest measure of where the weight
+of this project sits, and two files carrying a third of it is a fact a reader
+should have before they open one.
+
+### Project and documents
+
+- `project.godot`: Compatibility renderer, 1280x720 default viewport,
+  `canvas_items` stretch with `expand`, main scene `scenes/Main.tscn`,
+  `GameBalance` autoload, and the input map: drive, steer, handbrake, spray,
+  siren, hydrant hookup, pause, return to station, and `cycle_zoom` on Z.
+- `README.md`: how James launches it, the controls, and the two test commands.
+- `DESIGN.md`: what the game is and how it plays, including the rules for how a
+  house looks, how a street is named, and how the map meets its edge.
+- `DEVELOPMENT_STATUS.md`: this file. One section per milestone, each ending in
+  what was verified and what is known to be wrong.
+- `ATTRIBUTION.md`: the OpenStreetMap credit and licence, and what in the
+  Windsor map is real and what is invented.
+- `.gitattributes`, `.gitignore`.
+
+### Game scripts (`scripts/`, 6,372 lines)
+
+The map, which is over half of it:
+
+- `MapBuilder.gd` (1,151): builds the whole playable scene from a
+  `MapDefinition`. Roads, sidewalks, kerbs, fences, yards, the one building
+  renderer, driveways, street labels, the map-edge barricades and dead end
+  signs, the ground outside the map, and the boundary walls. Owns the draw
+  order.
+- `MapValidator.gd` (492): the eight rules any map must satisfy. Connectivity
+  from the spawn, features at a reachable kerb, minimum road width, roads
+  overlapping only at junctions, buildings off the road, no two buildings
+  overlapping, nothing running off the map, and land that derives as solid.
+- `MapGeometry.gd` (364): the polygon regions everything is drawn and collided
+  from, derived from the road network alone. Road slabs, junction fills, and
+  the hole-safe subtraction that gives the kerb and fence lines.
+- `MapDefinition.gd` (359): the data-only description of a neighbourhood, plus
+  the hand-built fictional one.
+- `RoadGraph.gd` (316): the road network as an actual graph, with route lengths
+  along the pavement.
+- `MapCatalogue.gd` (70): which maps exist and where they live.
+
+The game:
+
+- `Main.gd` (536): scene orchestration and the only place that reads the
+  keyboard and mouse.
+- `GameUI.gd` (694): the HUD, home menu, map select, Data and Credits, results
+  and shop, all built in code.
+- `FireIncident.gd` (302), `WaterSystem.gd` (315), `Hydrant.gd` (245): the fire,
+  the tank and turret, and refilling.
+- `TruckController.gd` (257), `TruckBody.gd` (104): driving and damage.
+- `GameSession.gd` (217), `SaveManager.gd` (212), `DispatchManager.gd` (206):
+  the shift, the save file, and sequential calls.
+- `FollowCamera.gd` (177): north-up follow camera, zoom levels, overscan, shake.
+- `GameBalance.gd` (244): every tuning value, each marked as specified by the
+  handoff or invented.
+- `IncidentIndicator.gd` (80), `PauseMenu.gd` (31).
+
+### Scenes (`scenes/`)
+
+`Main.tscn` (the real orchestrator, not a placeholder), `Truck.tscn`,
+`PauseMenu.tscn`.
+
+### Resources and data
+
+- `resources/neighbourhood.tres`: Elm Grove, the fictional map. 4,000 x 3,000.
+- `resources/windsor_shadetree.tres`: the Windsor import. 7,820 x 6,140.
+- `data/source/`: the one-time Overpass response and the query that produced it,
+  committed verbatim. The game never reads these.
+
+### Tests (`tests/`, 4,562 lines)
+
+- `run_tests.gd` (128): the fast headless runner. Discovers `test_*.gd`.
+- `run_physics_tests.gd` (1,474): the slow runner. Boots the real scene and
+  drives it. 112 checks.
+- Eleven test files: water and hydrants (650), session and save (620), osm
+  import (386), map definition (329), street labels (185), map geometry (174),
+  building style (164), first call (148), truck damage (145), incident
+  indicator (125), and the shared base class (34).
+
+### Tools (`tools/`)
+
+- `import_osm.gd` (1,609): turns the committed extract into
+  `windsor_shadetree.tres`. Deterministic; two runs give a byte-identical file.
+- `validate_map.gd` (76): runs `MapValidator` over both maps.
+- `measure_scale.gd` (121): reports road width, house width and junction spacing
+  in truck lengths, which is how the scale was chosen.
+- `regenerate_map.gd` (25): rewrites the fictional map from `MapDefinition`.
 
 ## GameBalance Values
 
@@ -1558,6 +1629,191 @@ were found; none of them would have failed a check.
   all kept deliberately, all named as dead in the file.
 - The "Current File Inventory" section at the top of this file is still stale,
   now for six milestones.
+- Escalation is still not slowed by effective suppression, per handoff §5.
+- Driving on the sidewalk is still free, pending pedestrians.
+- No audio at all.
+
+## Milestone 8: Overlapping Houses, and the Edge of the World
+
+James played the widened Windsor map and found two defects in his screenshots,
+plus one on the HUD. All three were real. The zoom key stays, as a control.
+
+### Part 0: the audit, before anything was changed
+
+Both maps rendered to PNG and every defect class counted. Elm Grove was clean on
+all five. Windsor:
+
+| What | Count | Notes |
+| --- | --- | --- |
+| Overlapping footprints | 12 pairs | ALL `osm` x `synthetic`. 0 osm/osm, 0 synthetic/synthetic. None wholly contained. Worst 22,450 square units |
+| Junction fills touching the map edge | 9 | 5 real junctions (3 or 4 arms), 4 two-arm bends. All on the east and south sides |
+| Road slabs running under the wall | 22 of 105 | 5 top, 9 bottom, 10 right, 0 left |
+| Dead ends at the wall with no terminus | 16 | Nothing drawn to say the road stopped |
+| Labels off the asphalt | 0 | Milestone 7's rule holds |
+| Driveways onto a road | 0 | 9 of 85 overlap a footprint, all their own, by design |
+| Synthetic lots straddling the wall | 12 | `b_syn_8` through `b_syn_19`, half of each outside the world |
+
+**The overlap classification settled the root cause before a line was changed.**
+Every overlapping pair was one synthetic lot on one or more real houses, and the
+extract contains no `building:part` at all, so this was never OpenStreetMap
+carrying overlapping parts. It was the importer.
+
+**Shadetree.** The raw data has two ways: `way/7707873` "Shadetree Drive",
+`highway=residential`, 16 nodes, latitude 38.540906 to 38.545114; and
+`way/7716809` "Shadetree Lane", `highway=residential`, 3 nodes, 38.545114 to
+38.545723. They are consecutive: the street changes name where one ends and the
+other begins. Both labels are correct and neither is a bug. Windsor has a
+Shadetree Drive and a Shadetree Lane, and the short one is at the north end.
+
+**And the thing the audit found that the prompt did not anticipate.** Shadetree
+Lane and Leafhaven Lane do not meet at a junction on the map at all. They meet
+at OSM node `56129843`, 2.5 metres north of the download box, and the box cut
+that junction off, leaving two dead ends 83 units apart at the top wall. There
+was no junction there for a rule about junctions on the edge to find.
+
+### Part 1: no house is drawn on top of another
+
+`_synthesize_lots` decided whether a stretch of road frontage was empty by
+testing ONE point, the centre of the band at half the lot depth from the kerb. A
+real house set back further or nearer than that single sample was invisible to
+it, so a full-depth lot went down on top of the house. The same one point
+decided whether the lot was inside the world, which is why twelve lots straddled
+the walls.
+
+Fixed three ways: the band is sampled across its whole depth; every finished lot
+is then tested as a polygon against the real footprints, the lots already
+accepted, the road slabs and the world bounds with a 20 unit margin, and dropped
+if it cannot meet that; and `building:part` ways are skipped, with two
+overlapping real footprints resolving by keeping the larger. The last is a no-op
+on this extract and is stated as one.
+
+`MapValidator` gains rule 6, no two building polygons overlap. The unit suite
+asks the same question and also that every footprint lies inside the world.
+
+### Part 2: the map stops where it says it stops
+
+Two separate problems with one visible symptom.
+
+**The clip box, on James's decision.** Overpass was asked for ways intersecting
+the download box and answered with `out geom`, which returns each matching way's
+complete geometry, so the committed JSON has always held 226 m of road north of
+the box and 133 m east. The map now reaches 30 m further north and east into
+ground that was already in the file: no network call, no invented geography. 30
+m is the smallest extension that brings the cut junctions inside. Not more,
+because coverage past the download box is ragged by construction.
+
+**The wall.** A centreline clipped to a boundary still carries a slab half a
+road width either side of it. Pulling each centreline in by half its own width
+was tried first and was wrong: three roads then stopped 140 units short and
+landed their ends in the middle of a road running along the edge, which
+`test_no_dead_end_is_a_missed_junction` caught. So the roads stay where the
+survey puts them and the wall moves out. The world is the geographic box plus a
+200 unit verge, 200 being half the widest road this importer can produce.
+
+What the player sees at a road's end: a striped barricade across the asphalt,
+and an American yellow diamond with a black T on the verge past it, turned so
+the T reads the right way up to a driver coming down that road. It therefore
+looks inverted in a screenshot read screen-up and is correct in the game. James
+asked for the sign while this part was being written. A cul-de-sac in the middle
+of the neighbourhood gets neither: it is a real place a real street ends.
+
+**Camera.** The limits were the world bounds exactly, so the view stopped dead
+at a wall and the truck slid to the edge of the frame. It may now overscan half
+a screen past the bounds, measured in screen height at the zoom in use, and
+`MapBuilder` draws a dark band outside the map so the overscan shows ground.
+
+Two smaller things the change exposed: a hydrant placed by stepping out from its
+junction's first arm by that arm's half width landed 215 units from the road
+really nearest it against the 200 allowed, and is now placed against the road
+the validator measures it against; and clipping put a new vertex a few units
+from a surveyed one on three roads, leaving stubs `RoadGraph` could not weld,
+each reading as a dead end standing in its own carriageway.
+
+`MapValidator` gains rule 7: no junction fill touches the map edge and no road
+slab passes the wall.
+
+| | Before | After |
+| --- | --- | --- |
+| World | 7,000 x 5,320 | 7,820 x 6,140 |
+| Buildings | 255 (237 real, 18 synthetic) | 272 (261 real, 11 synthetic) |
+| Overlapping pairs | 12 | 0 |
+| Junction fills on the edge | 9 | 0 |
+| Road slabs under the wall | 22 | 0 |
+| Roads with a terminus | 0 of 16 | every one |
+
+### Part 3: the urgent line, and Z as a control
+
+Under thirty seconds the escalation line grew from 15 point to 20. Measuring it
+rather than assuming found that the rows never intersected: the column reflows,
+so the growth pushed the rows below down by six pixels. That is worth stating
+plainly, because the first version of the new check passed with the defect
+deliberately put back.
+
+What was really wrong was that the line grew into a four pixel gap and sat
+touching the line under it, and that HUD text had nothing behind it so a pale
+street name painted on the asphalt read through the numbers. The gap is eight
+now, urgency is carried by the wording and by weight through a `FontVariation`,
+which does not change a row's height, and the top-right column sits on its own
+dark backing.
+
+Z is a control: an input action, in the pause menu and in `README.md`, with the
+HUD naming the level it moved to, and the chosen level kept for the session
+across shifts and map changes.
+
+### Verification Performed
+
+    --headless --path . --script res://tests/run_tests.gd          exit 0
+        10 test files, 79 test methods, 4012 assertions, 0 failed
+    --headless --path . --script res://tests/run_physics_tests.gd  exit 0
+        112 checks, 0 failed
+    --headless --path . --script res://tools/validate_map.gd       exit 0
+        2 maps, 8 rules each, 0 failed
+    --headless --path . --script res://tools/import_osm.gd, twice
+        byte-identical resource both times
+
+Physics checks went 92 to 112. Unit methods went 77 to 79 and assertions 2,450
+to 4,012.
+
+Both maps were rendered to PNG before and after every visual change and looked
+at. That is how the overlap fix, the junction fix and the terminus were
+confirmed, and it is how the first driveway and label defects in Milestone 7
+were found. It is now the required method for any visual part.
+
+### Checkers proven by deliberate failure
+
+- **Rule 6, no two buildings overlap.** Putting the previous
+  `windsor_shadetree.tres` back from git fails it and both new unit checks,
+  naming the offenders, worst 22,450 square units (`b_osm_1021191705` over
+  `b_syn_0`), and 12 footprints outside the world starting at `b_syn_8`. Also
+  proven in memory by cloning a real footprint 20 units along, reported as
+  29,249 square units shared.
+- **Rule 7, nothing runs off the map.** Shrinking the Windsor bounds in memory
+  passes at the true size; at 200 units in it reports five roads past the wall,
+  worst 115; at 400 in it reports five junctions on the edge as well, worst 367.
+- **The HUD gap check, which took two attempts to make real.** The first version
+  measured the gap as `GameUI.HUD_ROW_SEPARATION / 2`, the constant it is meant
+  to be policing, so setting that constant to zero lowered the bar with it and
+  the check still passed. It asserts a literal six pixels now: at a separation
+  of zero it fails on all three pairs of rows at both resolutions in both
+  states, and passes at eight. This is the third time on this project that a
+  checker's first version could not fail.
+
+### Known Issues
+
+- **Nothing here has been played.** Every number is headless or from a rendered
+  still. Whether the Shadetree and Leafhaven corner now drives right, and
+  whether that Hackberry block reads as a street, is James's to judge.
+- Windsor's coverage past the original download box is ragged by construction:
+  only ways that poked into the box are in the file, so the 30 m fringe has
+  roads whose neighbours are missing. It is inside the map and it is thin.
+- 9 of 81 driveways overlap a footprint by more than a quarter of the strip.
+  Every one is its own house, which is what the strip is meant to do, but the
+  threshold has not been tuned and a genuinely wrong one would not stand out.
+- Four two-arm bends still have fills reaching the map edge. Rule 7 asks about
+  junctions of three arms or more, because a road is allowed to bend as it
+  approaches the edge it ends at.
+- `MapDefinition.blocks`, `body_color` and `roof_color` are still dead data,
+  kept deliberately and named as dead in the file.
 - Escalation is still not slowed by effective suppression, per handoff §5.
 - Driving on the sidewalk is still free, pending pedestrians.
 - No audio at all.
