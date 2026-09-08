@@ -90,6 +90,9 @@ func _run() -> void:
 	await _check_the_narrowest_road_the_truck_can_turn_in()
 	await _check_the_hud_rows_never_overlap()
 	await _check_the_zoom_control_holds_its_level()
+	await _check_the_minimap_clears_the_prompt_line_and_the_hud_column()
+	await _check_the_minimap_toggle_holds_across_a_change_of_map()
+	await _check_the_minimap_zoom_never_moves_the_camera_zoom()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -1701,6 +1704,239 @@ func _check_a_truck_rocking_on_the_boundary_hooks_up_only_once() -> void:
 		hydrant.has_hose_out(),
 		"and once it settles for %.1f s the hose goes out again (state %d)"
 			% [balance.hydrant_rehook_delay, hydrant.get_state()]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## The minimap keeps out of everything else's way (Milestone 9 Part 0c).
+##
+## Three rectangles that share a screen: the minimap in the bottom right, the
+## prompt line along the bottom, and the top-right HUD column. The prompt line
+## is the one that had to move: its label used to be PRESET_BOTTOM_WIDE, so its
+## rect ran the full width of the screen and straight under the minimap.
+##
+## Measured on get_global_rect() at both resolutions, with the longest prompt
+## the game can actually produce in the label, because a check run with an empty
+## prompt would pass on a label that has no width.
+func _check_the_minimap_clears_the_prompt_line_and_the_hud_column() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var ui: GameUI = main.get_node("GameUI")
+
+	main._session.start_shift()
+	await physics_frame
+
+	# The longest lines the game has. If a longer one is written later, this is
+	# the list it has to be added to.
+	var prompts: Array[String] = [
+		"Out of water. Pull up slowly at a hydrant to refill",
+		"Refilling, 100/125 units",
+		"Slow down to hook up",
+		"Hose snapped",
+	]
+
+	for window_size in [Vector2i(1280, 720), Vector2i(960, 540)]:
+		# BOTH, and then the screen is read back rather than assumed. Setting
+		# content_scale_size alone left the UI laid out in the headless window's
+		# own size, and the first version of this check was measuring rectangles
+		# against a screen 1280 by 1280 that no player will ever have.
+		get_root().size = window_size
+		get_root().content_scale_size = window_size
+		await physics_frame
+		var screen: Rect2 = get_root().get_visible_rect()
+		_check(
+			Vector2i(screen.size) == window_size,
+			"the window really is %dx%d for this pass (%s)" % [
+				window_size.x, window_size.y, screen.size
+			]
+		)
+		for prompt in prompts:
+			ui.set_prompt(prompt)
+			ui.set_margin_seconds(4.0)
+			ui.set_call(1, 3)
+			ui.set_credits(1250)
+			ui.set_siren(true)
+			await physics_frame
+			await physics_frame
+
+			var minimap: Rect2 = ui.get_minimap().get_global_rect()
+			var button: Rect2 = ui.get_minimap().get_zoom_button().get_global_rect()
+			var prompt_rect: Rect2 = ui._prompt_label.get_global_rect()
+			var column: Rect2 = ui._call_label.get_global_rect().merge(
+				ui._siren_label.get_global_rect()
+			)
+
+			# The zoom button lives inside the panel, so it is clear of
+			# everything the panel is clear of, but it is asserted separately
+			# because it is the one thing on the HUD a player has to hit.
+			_check(
+				minimap.encloses(button),
+				"%dx%d: the zoom button %s is inside the panel %s" % [
+					window_size.x, window_size.y, button, minimap
+				]
+			)
+			_check(
+				not button.intersects(prompt_rect) and not button.intersects(column),
+				"%dx%d: and clear of the prompt line and the HUD column" % [
+					window_size.x, window_size.y
+				]
+			)
+			_check(
+				not minimap.intersects(prompt_rect),
+				"%dx%d: the minimap %s clears the prompt line %s carrying \"%s\"" % [
+					window_size.x, window_size.y, minimap, prompt_rect, prompt
+				]
+			)
+			_check(
+				not minimap.intersects(column),
+				"%dx%d: and clears the HUD column %s" % [
+					window_size.x, window_size.y, column
+				]
+			)
+			_check(
+				not prompt_rect.intersects(column),
+				"%dx%d: and the prompt line clears the HUD column too" % [
+					window_size.x, window_size.y
+				]
+			)
+
+		# And the panel is actually on the screen, in the corner it says it is
+		# in. A minimap pushed off the bottom right would pass every intersection
+		# test above by not being anywhere.
+		var panel: Rect2 = ui.get_minimap().get_global_rect()
+		_check(
+			screen.encloses(panel),
+			"%dx%d: the minimap is fully on screen (%s in %s)" % [
+				window_size.x, window_size.y, panel, screen
+			]
+		)
+		_check(
+			panel.end.x > float(window_size.x) * 0.6
+				and panel.end.y > float(window_size.y) * 0.6,
+			"%dx%d: and it is in the bottom right corner (ends at %s)" % [
+				window_size.x, window_size.y, panel.end
+			]
+		)
+
+	ui.set_prompt("")
+	get_root().size = Vector2i(1280, 720)
+	get_root().content_scale_size = Vector2i(1280, 720)
+	main.queue_free()
+	await physics_frame
+
+
+## M turns the panel off and on, and the choice survives a change of map, the
+## same way the zoom level does.
+func _check_the_minimap_toggle_holds_across_a_change_of_map() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var ui: GameUI = main.get_node("GameUI")
+
+	_check(ui.is_minimap_shown(), "the minimap starts on")
+
+	main._toggle_minimap()
+	_check(not ui.is_minimap_shown(), "M turns it off")
+	_check(
+		main._transient_message == "Minimap off",
+		"and says so on the prompt line (\"%s\")" % main._transient_message
+	)
+
+	main.load_map(WINDSOR_MAP)
+	await physics_frame
+	_check(not ui.is_minimap_shown(), "and it stays off across a change of map")
+
+	main._toggle_minimap()
+	_check(ui.is_minimap_shown(), "M turns it back on")
+	main.load_map(ELM_GROVE_MAP)
+	await physics_frame
+	_check(ui.is_minimap_shown(), "and that survives a change of map as well")
+
+	# The panel really was rebuilt for the map now loaded, rather than still
+	# drawing the last one: the station of THIS map lands inside the drawing.
+	var minimap: Minimap = ui.get_minimap()
+	var station: Vector2 = minimap.world_to_panel(main.get_station_spawn_position())
+	_check(
+		minimap.get_content_rect().grow(0.01).has_point(station),
+		"and it is drawing the map that is loaded (station at %s in %s)" % [
+			station, minimap.get_content_rect()
+		]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## THE TWO ZOOMS ARE INDEPENDENT.
+##
+## The minimap has its own zoom on N and on the button in its corner; the camera
+## has had its own on Z since Milestone 8. They are two controls on one screen
+## that both mean "zoom", and the one way this feature can be wrong in a way
+## nobody notices until they are driving is for one of them to move the other.
+## Cycled in both directions here, against the real camera in the real scene.
+func _check_the_minimap_zoom_never_moves_the_camera_zoom() -> void:
+	var world: Array = await _make_world()
+	var main: Node = world[0]
+	var ui: GameUI = main.get_node("GameUI")
+	var camera: Node = main.get_node("Camera")
+	var minimap: Minimap = ui.get_minimap()
+
+	main._session.start_shift()
+	await physics_frame
+
+	# Cycling the minimap leaves the camera exactly where it was.
+	var camera_before: Vector2 = camera.zoom
+	var camera_level_before: int = main._zoom_index
+	for _step in range(minimap.get_zoom_levels().size() + 1):
+		main._cycle_minimap_zoom()
+		await physics_frame
+		_check(
+			camera.zoom.is_equal_approx(camera_before),
+			"minimap zoom %sx leaves the camera at %s (%s)" % [
+				String.num(minimap.get_zoom(), 1), camera_before, camera.zoom
+			]
+		)
+	_check(
+		main._zoom_index == camera_level_before,
+		"and the camera's own zoom level is untouched (%d)" % main._zoom_index
+	)
+
+	# And the other way: cycling the camera leaves the minimap where it was.
+	var minimap_before: int = minimap.get_zoom_index()
+	var view_before: Rect2 = minimap.get_view_rect()
+	for _step in range(main._zoom_levels().size() + 1):
+		main._cycle_camera_zoom()
+		await physics_frame
+		_check(
+			minimap.get_zoom_index() == minimap_before,
+			"camera zoom %.2f leaves the minimap on level %d (%d)" % [
+				camera.zoom.x, minimap_before, minimap.get_zoom_index()
+			]
+		)
+	_check(
+		minimap.get_view_rect().is_equal_approx(view_before),
+		"and the minimap is still showing the same piece of the map"
+	)
+
+	# The button in the panel's corner is the same control as N, not a second
+	# one that happens to look like it. Measured against where the camera is
+	# NOW: the loop above deliberately moved it, and comparing against the zoom
+	# it had at the top of this check would be asserting that the camera control
+	# does not work.
+	var camera_now: Vector2 = camera.zoom
+	var by_key: int = minimap.get_zoom_index()
+	minimap.get_zoom_button().pressed.emit()
+	await physics_frame
+	_check(
+		minimap.get_zoom_index() != by_key,
+		"pressing the panel's own button moves the minimap zoom too (%d to %d)" % [
+			by_key, minimap.get_zoom_index()
+		]
+	)
+	_check(
+		camera.zoom.is_equal_approx(camera_now),
+		"and still does not touch the camera (%s, was %s)" % [camera.zoom, camera_now]
 	)
 
 	main.queue_free()

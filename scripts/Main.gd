@@ -34,6 +34,12 @@ var _transient_message: String = ""
 var _transient_message_remaining: float = 0.0
 var _zoom_index: int = 0
 
+## Whether the minimap is showing. Session state, like _zoom_index: not saved.
+var _minimap_shown: bool = true
+
+## Which of GameBalance.minimap_zoom_levels the panel is on. Session state too.
+var _minimap_zoom_index: int = 0
+
 
 func _ready() -> void:
 	print(
@@ -119,6 +125,12 @@ func load_map(path: String) -> void:
 	_dispatch.setup(
 		self, _map_builder.get_incident_candidates(), _routes_from_station()
 	)
+
+	# The minimap's static half is built once per map, here, from the same
+	# definition and the same hydrant list everything else on the map came from.
+	_ui.configure_minimap(_map_definition, _map_builder.get_hydrant_definitions())
+	_ui.set_minimap_shown(_minimap_shown)
+	_ui.set_minimap_zoom_index(_minimap_zoom_index)
 
 
 ## How far every incident candidate is from the station along the roads, by
@@ -264,6 +276,39 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("cycle_zoom"):
 		_cycle_camera_zoom()
 		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("toggle_minimap"):
+		_toggle_minimap()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("cycle_minimap_zoom"):
+		_cycle_minimap_zoom()
+		get_viewport().set_input_as_handled()
+
+
+## M. The minimap is on by default and can be turned off by anyone who would
+## rather have the corner back. Kept for the rest of the session, across shifts
+## and across a change of map, for the same reason the zoom level is: a view
+## setting that reset itself every time a shift started would have to be set
+## again every time. Not saved to disk, which is where the zoom's own rule stops
+## too.
+func _toggle_minimap() -> void:
+	_minimap_shown = _ui.toggle_minimap()
+	_transient_message = "Minimap on" if _minimap_shown else "Minimap off"
+	_transient_message_remaining = TRANSIENT_MESSAGE_SECONDS
+
+
+## N, and the button in the panel's corner, which call the same thing.
+##
+## THIS IS NOT THE CAMERA'S ZOOM. It changes how much of the neighbourhood the
+## little panel shows and nothing else; Z still does what Z has always done, and
+## a physics check asserts that cycling one leaves the other where it was.
+func _cycle_minimap_zoom() -> void:
+	_minimap_zoom_index = _ui.cycle_minimap_zoom()
+	_transient_message = "Minimap zoom %sx" % String.num(_ui.get_minimap().get_zoom(), 0)
+	_transient_message_remaining = TRANSIENT_MESSAGE_SECONDS
 
 
 ## Z, a real control since Milestone 8 Part 3.
@@ -317,7 +362,9 @@ func _physics_process(delta: float) -> void:
 	# flows net out. is_spray_allowed() is still asked, so a later rule that
 	# does refuse the stream only has to be written in one place.
 	_water.set_spray_requested(
-		Input.is_action_pressed("spray") and _water.is_spray_allowed()
+		Input.is_action_pressed("spray")
+		and _water.is_spray_allowed()
+		and not _ui.is_pointer_over_minimap()
 	)
 
 	_update_hud()
@@ -400,12 +447,38 @@ func _on_truck_damaged(_amount: float, impact_speed: float) -> void:
 
 func _update_hud() -> void:
 	var incident: FireIncident = _dispatch.active_incident
-	if incident != null and is_instance_valid(incident) and not incident.is_terminal():
+	var live: bool = (
+		incident != null and is_instance_valid(incident) and not incident.is_terminal()
+	)
+	if live:
 		_ui.set_margin_seconds(incident.get_escalation_remaining())
 		_ui.set_incident_indicator(_incident_indicator_state(incident.global_position))
 	else:
 		_ui.set_margin_seconds(0.0)
 		_ui.set_incident_indicator(IncidentIndicator.hidden())
+
+	# The off-screen arrow stays exactly as it was: it answers "which way is the
+	# call from here", which is a different question from "where am I on this
+	# neighbourhood", and neither replaces the other.
+	_ui.update_minimap(
+		_truck.global_position,
+		_truck.rotation,
+		incident.global_position if live else Vector2.ZERO,
+		live,
+		_camera_world_rect()
+	)
+
+
+## The rectangle of world the camera can currently see, derived from the
+## viewport's own canvas transform rather than from the camera's position and
+## zoom. The transform already accounts for the camera's lead, its smoothing and
+## its clamp to the map edge, so the rectangle on the minimap is what is on the
+## screen rather than what the camera was asked for.
+func _camera_world_rect() -> Rect2:
+	var canvas: Transform2D = get_viewport().get_canvas_transform()
+	var to_world: Transform2D = canvas.affine_inverse()
+	var view: Rect2 = get_viewport_rect()
+	return Rect2(to_world * view.position, to_world.basis_xform(view.size))
 
 
 ## Whether the off-screen arrow is shown for a world position, and where on the

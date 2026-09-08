@@ -36,6 +36,17 @@ const HUD_ROW_SEPARATION: int = 8
 ## Seconds of margin below which the countdown starts shouting.
 const URGENT_SECONDS: float = 30.0
 
+## How far the prompt line's band is pulled in from each side, so it can never
+## run under the minimap in the bottom right corner. The minimap's own width
+## plus both margins, applied to both sides so the line stays centred.
+const PROMPT_SIDE_INSET: float = Minimap.PANEL_SIZE.x + EDGE_MARGIN * 2.0
+
+## Where the bottom of the prompt band sits above the bottom of the screen, and
+## how tall it is. Two lines' worth at font size 18, so the longest prompt has
+## somewhere to wrap to rather than being clipped by its own band.
+const PROMPT_BOTTOM_MARGIN: float = 70.0
+const PROMPT_BAND_HEIGHT: float = 52.0
+
 
 var _hud: Control
 var _condition_bar: ProgressBar
@@ -46,6 +57,7 @@ var _call_label: Label
 var _margin_label: Label
 var _credits_label: Label
 var _prompt_label: Label
+var _minimap: Minimap
 var _siren_label: Label
 
 var _menu_panel: Control
@@ -194,12 +206,43 @@ func _build_hud() -> void:
 	right.add_child(_credits_label)
 	right.add_child(_siren_label)
 
+	# Bottom right: the minimap.
+	_minimap = Minimap.new()
+	_minimap.name = "Minimap"
+	_minimap.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_minimap.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_minimap.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_minimap.position = Vector2(-EDGE_MARGIN, -EDGE_MARGIN) - Minimap.PANEL_SIZE
+	_hud.add_child(_minimap)
+
 	# Bottom centre: the one contextual prompt line.
+	#
+	# THE BAND IS INSET BY THE MINIMAP'S WIDTH ON BOTH SIDES (Milestone 9 Part
+	# 0c). The label used to be PRESET_BOTTOM_WIDE, so its rect ran the whole
+	# width of the screen and passed straight under the minimap; the text is
+	# centred and would usually have missed it, but "Out of water. Pull up
+	# slowly at a hydrant to refill" is wide enough to reach it. Inset on BOTH
+	# sides rather than only on the right, so the line stays centred on the
+	# screen rather than sitting visibly off to the left, and it wraps rather
+	# than overflowing if a future prompt is longer than the band.
+	# All four offsets set outright, and no write to position afterwards.
+	# Assigning position on an anchored Control rewrites the offsets to preserve
+	# the size it had at that moment, which silently undid offset_right and left
+	# the band the full width of the screen again.
 	_prompt_label = _make_label("", 18)
-	_prompt_label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_prompt_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_prompt_label.position = Vector2(0.0, -70.0)
+	_prompt_label.anchor_left = 0.0
+	_prompt_label.anchor_right = 1.0
+	_prompt_label.anchor_top = 1.0
+	_prompt_label.anchor_bottom = 1.0
+	_prompt_label.offset_left = PROMPT_SIDE_INSET
+	_prompt_label.offset_right = -PROMPT_SIDE_INSET
+	_prompt_label.offset_bottom = -PROMPT_BOTTOM_MARGIN
+	_prompt_label.offset_top = -PROMPT_BOTTOM_MARGIN - PROMPT_BAND_HEIGHT
 	_prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Bottom aligned, so one line sits exactly where the prompt line has always
+	# sat and a wrapped one grows upward into empty screen rather than downward.
+	_prompt_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	_prompt_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hud.add_child(_prompt_label)
 
 	# The off-screen incident indicator draws itself over the whole HUD.
@@ -283,7 +326,8 @@ func _build_menu_panel() -> void:
 	var controls := _make_label(
 		"W or up drives, S or down brakes then reverses, A and D steer."
 		+ " Space is a harder brake, Q toggles the lights, left mouse sprays,"
-		+ " Escape pauses. Roll up to a hydrant slowly and it hooks itself up.",
+		+ " Escape pauses, M turns the minimap off and on, N zooms it."
+		+ " Roll up to a hydrant slowly and it hooks itself up.",
 		13
 	)
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -651,6 +695,72 @@ func set_siren(active: bool) -> void:
 
 func set_prompt(text: String) -> void:
 	_prompt_label.text = text
+
+
+# ---------------------------------------------------------------------------
+# The minimap (Milestone 9 Part 0c)
+#
+# GameUI owns the panel and forwards to it, so Main talks to one HUD object
+# rather than reaching through it into a child.
+# ---------------------------------------------------------------------------
+
+func get_minimap() -> Minimap:
+	return _minimap
+
+
+## Called once per map load with everything the panel draws statically.
+func configure_minimap(definition: MapDefinition, hydrants: Array) -> void:
+	_minimap.configure(definition, hydrants)
+
+
+func update_minimap(
+	truck_position: Vector2, truck_rotation: float,
+	call_position: Vector2, call_active: bool, view_rect: Rect2
+) -> void:
+	_minimap.set_truck(truck_position, truck_rotation)
+	_minimap.set_call(call_position, call_active)
+	_minimap.set_view_rect(view_rect)
+
+
+func is_minimap_shown() -> bool:
+	return _minimap.visible
+
+
+## M. Returns the state it moved to, so the caller can say so on the prompt
+## line: a key that is obeyed silently is indistinguishable from one that did
+## nothing, which is the reason Z answers as well.
+func toggle_minimap() -> bool:
+	_minimap.visible = not _minimap.visible
+	return _minimap.visible
+
+
+func set_minimap_shown(shown: bool) -> void:
+	_minimap.visible = shown
+
+
+## N, and the button in the panel's own corner. Returns the level index it moved
+## to, so Main can keep it for the session the way it keeps the camera's.
+func cycle_minimap_zoom() -> int:
+	_minimap.cycle_zoom()
+	return _minimap.get_zoom_index()
+
+
+func set_minimap_zoom_index(index: int) -> void:
+	_minimap.set_zoom_index(index)
+
+
+## Whether the mouse is over the minimap panel.
+##
+## Main asks before it sprays. The zoom button consumes the click as far as the
+## GUI is concerned, but the spray action is POLLED from Input rather than read
+## from the event, so it does not care what the GUI did with it: without this,
+## clicking the minimap's own button would also fire the water cannon. Spraying
+## through a HUD panel is wrong even where there is no button under the cursor,
+## so the test is the whole panel rather than just the button.
+func is_pointer_over_minimap() -> bool:
+	if _minimap == null or not _minimap.visible:
+		return false
+	return _minimap.get_global_rect().has_point(_minimap.get_global_mouse_position())
 
 
 ## Takes an IncidentIndicator.evaluate() result: whether to show the arrow, the

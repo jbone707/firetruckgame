@@ -258,6 +258,18 @@ var first_call_min_route: float = 2000.0 # invented default, not from handoff
 ## width.
 var camera_zoom_levels: Array[float] = [0.9, 0.7, 0.55] # invented default, not from handoff
 
+## The minimap's own zoom levels, cycled by N and by the button in the panel's
+## corner. ENTIRELY SEPARATE FROM camera_zoom_levels ABOVE: this changes how
+## much of the neighbourhood the little panel shows and never touches the game
+## camera, which is the whole point of it having its own control.
+##
+## 1.0 means the whole map, letterboxed into the panel. Above 1.0 the panel
+## shows 1/level of the map's width and height, centred on the engine and
+## clamped to the map's own bounds so the panel never shows ground that is not
+## there. 4.0 on Windsor is about 1,950 by 1,535 units, which is a couple of
+## blocks: close enough to pick the next turning off.
+var minimap_zoom_levels: Array[float] = [1.0, 2.0, 4.0] # invented default, not from handoff
+
 
 # ---------------------------------------------------------------------------
 # Escalation travel allowance (handoff §5, sized in Milestone 4 Part 1)

@@ -48,6 +48,10 @@ yourself. All of that is already in the project files.
 - **Space**: handbrake, a stronger brake
 - **Q**: toggle the siren and lights
 - **Left Mouse Button**: spray water at wherever the cursor is
+- **M**: turn the minimap in the bottom right corner off and on
+- **N**: zoom the minimap, through three levels. This changes the minimap only
+  and never moves the game camera. The button in the minimap's own corner does
+  the same thing. Both this and **M** are kept for the rest of the session
 - **Z**: zoom the camera out or in, through three levels. The level you pick is
   kept for the rest of the session
 - **Escape**: pause
@@ -80,6 +84,13 @@ yourself. All of that is already in the project files.
   takes it out, so the tank still climbs.
 - When the call is off screen an arrow at the edge of the screen points to it.
   When it is on screen the arrow goes and a marker hangs over the building.
+- The minimap in the bottom right shows the whole neighbourhood, north up: the
+  streets as thin lines, hydrants as red dots, the call as a pulsing orange
+  marker, and the engine as a triangle pointing the way it is facing. The faint
+  rectangle around it is the piece of the map you can currently see. The arrow
+  tells you which way the call is; the minimap tells you where you are.
+  Zoomed in, the minimap follows the engine, and if the call is off the edge of
+  the panel a small orange triangle on the border points at it.
 - Crashing hurts, and a flat-out crash hurts a lot. The engine going out of
   service ends the shift.
 - Each call you clear banks 100 credits immediately. If the shift later fails you
