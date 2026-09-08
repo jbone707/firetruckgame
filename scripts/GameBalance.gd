@@ -359,3 +359,35 @@ var escalation_travel_speed: float = 110.0 # invented default, not from handoff
 ## either map actually produces, so the ceiling is once again a guard against a
 ## future pathological map rather than something today's maps run into.
 var escalation_travel_allowance_max: float = 150.0 # invented default, not from handoff
+
+
+# ---------------------------------------------------------------------------
+# Signal preemption (Milestone 10 Part 2)
+# ---------------------------------------------------------------------------
+
+## How close, in route units along the roads, the engine has to be to a
+## signalled junction before that junction starts clearing its cross traffic for
+## it. Measured forward only: a junction the engine has already driven through
+## is not being approached, however near it still is.
+##
+## 900 is about four seconds at top speed and a little over three road widths on
+## Windsor, so the sequence starts about a block out. It is deliberately not
+## enough time for the whole sequence to finish before a flat-out engine
+## arrives, which is the point of the next value.
+var signal_preempt_distance: float = 900.0 # invented default, not from handoff
+
+## THE DELAY IS THE GAME. A preempted junction does not simply turn green: the
+## cross arms take signal_amber_time to clear and then everything is red for
+## signal_all_red_time before the approach arm goes green, which is four seconds
+## from the moment the engine comes into range. At 250 units/second the engine
+## covers 1,000 units in that time, which is further than the range that started
+## the sequence. So arriving fast means arriving into cross traffic that has not
+## finished stopping, and the preemption is a reason to slow down rather than a
+## reason to speed up. There is no confirmation light: the player reads the
+## junction, not a signal aimed at them.
+
+## Seconds the junction holds the engine's green after the engine has cleared it,
+## before the ordinary cycle resumes from the next phase. Long enough that a
+## second vehicle on the same arm is not caught by the light snapping back, and
+## short enough that cross traffic is not left sitting at a red nobody needs.
+var signal_preempt_resume_hold: float = 2.0 # invented default, not from handoff

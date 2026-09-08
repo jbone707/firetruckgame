@@ -15,12 +15,33 @@ class_name TrafficSignals
 ## to decide which arm of a T carries the stop sign.
 ##
 ## NOTHING HERE STOPS THE PLAYER. The engine is not traffic. These exist to be
-## obeyed by the cars Part 3 adds, and to be looked at.
+## obeyed by the cars, and to be looked at.
+##
+## PREEMPTION is the one thing that breaks the map-wide clock, and it breaks it
+## for one junction at a time. With the siren on, a signalled junction the engine
+## is approaching inside signal_preempt_distance clears its cross traffic and
+## gives the engine's arm a green. The clearing is not instant and is not meant
+## to be: cross arms take an amber and then everything is red before the green
+## arrives, which is four seconds the engine can easily outrun. Arriving fast is
+## arriving into traffic that has not finished stopping. After the engine is
+## past, the junction holds for signal_preempt_resume_hold and then rejoins the
+## cycle at the next phase, carrying an offset from the map clock for the rest of
+## the shift.
 ##
 ## Pauses with the game: this node is PROCESS_MODE_PAUSABLE, so the clock stops
 ## when the tree does and the phase a junction was on is the phase it resumes on.
 
 enum Light { GREEN, AMBER, RED }
+
+## Where a junction is in a preemption sequence. NONE is the ordinary cycle.
+##
+## CLEARING and ALL_RED are the delay that makes arriving fast dangerous: the
+## cross arms that were moving go amber for signal_amber_time, then every arm is
+## red for signal_all_red_time, and only then does the approach arm go green.
+## GREEN is held until the engine is past, HOLD runs for
+## signal_preempt_resume_hold after that, and then the ordinary cycle resumes
+## from the next phase.
+enum Preempt { NONE, CLEARING, ALL_RED, GREEN, HOLD }
 
 ## The head: a dark housing with three lamps down it, drawn on the far corner of
 ## each approach so a driver reads the light for the arm they are on.
@@ -79,6 +100,24 @@ var _signals: Array[Dictionary] = []
 var _stop_signs: Array[Dictionary] = []
 
 var _lane_graph: LaneGraph = null
+
+## How often the road network is walked to find out which junctions the engine
+## is approaching, in seconds. Not every frame: the walk is a bounded Dijkstra
+## and the answer cannot change meaningfully in a sixtieth of a second, over
+## which the engine moves four units at top speed.
+const PREEMPT_SCAN_INTERVAL: float = 0.1
+
+## Where the engine is, which way it is pointing, and whether its siren is on.
+## Pushed in by Main every physics frame, because Main is the only node that
+## reads input and the only one that knows both the truck and this node.
+var _engine_position: Vector2 = Vector2.ZERO
+var _engine_forward: Vector2 = Vector2.RIGHT
+var _engine_siren: bool = false
+var _scan_due: float = 0.0
+
+## node id -> the edge index of the arm the engine is approaching down. Empty
+## whenever the siren is off, which is the whole of "siren off, no preemption".
+var _approaching: Dictionary = {}
 
 
 func resolve_balance() -> void:
@@ -184,6 +223,38 @@ func light_for_phase(phase: int) -> int:
 	)
 
 
+## What the ORDINARY CYCLE says this junction's phase is showing: the map-wide
+## clock plus this junction's own offset, which is zero unless a preemption has
+## left it running from a different point in the cycle.
+func cycle_light_for(entry: Dictionary, phase: int) -> int:
+	resolve_balance()
+	return light_at(
+		phase, clock + float(entry["offset"]),
+		balance.signal_green_time, balance.signal_amber_time, balance.signal_all_red_time
+	)
+
+
+## What this junction's phase is ACTUALLY showing, preemption included.
+##
+## The one rule this function exists to make unbreakable: the approach arm shows
+## green only in GREEN and HOLD, and in both of those every other phase shows
+## red. There is no state in which the approach arm is green and a cross arm is
+## anything else, so a car obeying its own light cannot be crossing the junction
+## at the moment the engine gets its green.
+func light_for_junction_phase(entry: Dictionary, phase: int) -> int:
+	var approach: int = int(entry["approach_phase"])
+	match int(entry["preempt"]):
+		Preempt.CLEARING:
+			if phase == approach:
+				return Light.RED
+			return Light.AMBER if entry["amber_phases"].has(phase) else Light.RED
+		Preempt.ALL_RED:
+			return Light.RED
+		Preempt.GREEN, Preempt.HOLD:
+			return Light.GREEN if phase == approach else Light.RED
+	return cycle_light_for(entry, phase)
+
+
 ## What a car arriving at this junction down this arm is being shown. RED for an
 ## arm with a stop sign on it, and GREEN at anything uncontrolled, so one call
 ## answers the question at every junction on the map.
@@ -193,7 +264,7 @@ func light_for_arm(node: int, edge_index: int) -> int:
 			continue
 		for head in entry["heads"]:
 			if int(head["edge_index"]) == edge_index:
-				return light_for_phase(int(head["phase"]))
+				return light_for_junction_phase(entry, int(head["phase"]))
 		return Light.GREEN
 	if _lane_graph != null and _lane_graph.arm_has_stop_sign(node, edge_index):
 		return Light.RED
@@ -209,10 +280,244 @@ func get_stop_sign_count() -> int:
 
 
 ## Called by Main when a shift starts, so every shift opens on the same phase
-## rather than on wherever the last one left the clock.
+## rather than on wherever the last one left the clock. Preemption goes with it:
+## a junction left holding a green for an engine that is no longer there would
+## be a junction the next shift starts broken.
 func reset_for_new_shift() -> void:
 	clock = 0.0
+	_approaching.clear()
+	_scan_due = 0.0
+	_engine_siren = false
+	for entry in _signals:
+		entry["preempt"] = Preempt.NONE
+		entry["preempt_elapsed"] = 0.0
+		entry["approach_phase"] = -1
+		entry["amber_phases"] = {}
+		entry["offset"] = 0.0
 	queue_redraw()
+
+
+# ---------------------------------------------------------------------------
+# Preemption
+# ---------------------------------------------------------------------------
+
+## Where the engine is and what it is doing. Called by Main every physics frame.
+## Nothing here acts on it; the scan runs on its own interval in advance().
+func set_engine_state(position: Vector2, forward: Vector2, siren_active: bool) -> void:
+	_engine_position = position
+	if forward.length_squared() > 0.0:
+		_engine_forward = forward.normalized()
+	_engine_siren = siren_active
+
+
+## Which signalled junctions the engine is approaching, and down which arm.
+## node id -> edge index. Empty with the siren off.
+func approaching_junctions() -> Dictionary:
+	return _approaching
+
+
+func preempt_state_of(node: int) -> int:
+	for entry in _signals:
+		if int(entry["node"]) == node:
+			return int(entry["preempt"])
+	return Preempt.NONE
+
+
+## The arm the engine is coming in on at a junction it is approaching, or -1.
+func preempt_approach_arm(node: int) -> int:
+	return int(_approaching.get(node, -1))
+
+
+## Walks the road network forward from the engine and returns every signalled
+## junction within reach, with the arm the engine would arrive down.
+##
+## FORWARD ONLY, and that is what makes "the engine has cleared the junction" a
+## fact rather than a guess. The walk starts at the end of the segment the engine
+## is heading towards and is forbidden to go back down that segment, so a
+## junction the engine has just driven through is not reachable at all and drops
+## out of the answer the moment it is behind. Nothing has to notice the engine
+## passing; the junction simply stops being approached.
+##
+## Distances are route units along the road centrelines, the same measure the
+## escalation allowance is priced in, and not the straight line: a junction 300
+## units away across a block is not 300 units of driving.
+func scan_for_approaches(reach: float) -> Dictionary:
+	var found: Dictionary = {}
+	if _lane_graph == null or not _engine_siren or _signals.is_empty():
+		return found
+	var graph: RoadGraph = _lane_graph.get_road_graph()
+	if graph == null or graph.edges.is_empty():
+		return found
+
+	# The segment the engine is on, and the end of it the engine is heading for.
+	var entry_edge: int = -1
+	var nearest: float = INF
+	for index in range(graph.edges.size()):
+		var edge: Dictionary = graph.edges[index]
+		var distance: float = _distance_to_segment(
+			_engine_position, graph.positions[int(edge["a"])], graph.positions[int(edge["b"])]
+		)
+		if distance < nearest:
+			nearest = distance
+			entry_edge = index
+	if entry_edge < 0:
+		return found
+
+	var edge_here: Dictionary = graph.edges[entry_edge]
+	var a: Vector2 = graph.positions[int(edge_here["a"])]
+	var b: Vector2 = graph.positions[int(edge_here["b"])]
+	var head: int = int(edge_here["a"])
+	if _engine_forward.dot(b - _engine_position) > _engine_forward.dot(a - _engine_position):
+		head = int(edge_here["b"])
+
+	var distances: Dictionary = {head: _engine_position.distance_to(graph.positions[head])}
+	var arrival: Dictionary = {head: entry_edge}
+	var settled: Dictionary = {}
+
+	# Plain repeated-minimum Dijkstra over the reached set only, bounded by the
+	# preempt range. Windsor has 200-odd nodes and this reaches a few dozen of
+	# them, ten times a second, and only while the siren is on.
+	while true:
+		var current: int = -1
+		var current_distance: float = INF
+		for node in distances:
+			if settled.has(node):
+				continue
+			if float(distances[node]) < current_distance:
+				current_distance = float(distances[node])
+				current = int(node)
+		if current < 0 or current_distance > reach:
+			break
+		settled[current] = true
+		for edge_index in graph.incident_edges.get(current, [] as Array[int]):
+			if current == head and int(edge_index) == entry_edge:
+				continue
+			var edge: Dictionary = graph.edges[int(edge_index)]
+			var other: int = (
+				int(edge["b"]) if int(edge["a"]) == current else int(edge["a"])
+			)
+			var candidate: float = current_distance + float(edge["length"])
+			if candidate < float(distances.get(other, INF)):
+				distances[other] = candidate
+				arrival[other] = int(edge_index)
+
+	for entry in _signals:
+		var node: int = int(entry["node"])
+		if not settled.has(node):
+			continue
+		if float(distances[node]) > reach:
+			continue
+		found[node] = int(arrival[node])
+	return found
+
+
+static func _distance_to_segment(point: Vector2, a: Vector2, b: Vector2) -> float:
+	var span: Vector2 = b - a
+	var length_squared: float = span.length_squared()
+	if length_squared <= 0.0:
+		return point.distance_to(a)
+	var t: float = clampf((point - a).dot(span) / length_squared, 0.0, 1.0)
+	return point.distance_to(a + span * t)
+
+
+func _phase_of_edge(entry: Dictionary, edge_index: int) -> int:
+	for head in entry["heads"]:
+		if int(head["edge_index"]) == edge_index:
+			return int(head["phase"])
+	return -1
+
+
+func _set_preempt(entry: Dictionary, state: int) -> void:
+	entry["preempt"] = state
+	entry["preempt_elapsed"] = 0.0
+
+
+## The sequence starts here. Which cross arms show amber is decided ONCE, from
+## what they were showing at this instant: an arm already red stays red rather
+## than lighting an amber nobody needs, and an arm that was moving gets the amber
+## a driver is owed before a red.
+func _begin_preempt(entry: Dictionary, edge_index: int) -> void:
+	var phase: int = _phase_of_edge(entry, edge_index)
+	if phase < 0:
+		return
+	entry["approach_phase"] = phase
+	var ambers: Dictionary = {}
+	for head in entry["heads"]:
+		var other: int = int(head["phase"])
+		if other == phase:
+			continue
+		var light: int = cycle_light_for(entry, other)
+		if light == Light.GREEN or light == Light.AMBER:
+			ambers[other] = true
+	entry["amber_phases"] = ambers
+	# Already ours. Taking a green away only to give it back four seconds later
+	# would be a worse junction than the one the cycle was already running, and
+	# the cross arms are red already, so the invariant holds without the wait.
+	if cycle_light_for(entry, phase) == Light.GREEN:
+		_set_preempt(entry, Preempt.GREEN)
+		return
+	_set_preempt(entry, Preempt.CLEARING)
+
+
+## Back to the ordinary cycle, from the next phase after the engine's.
+##
+## The offset is what "resumes from the next phase" means with one clock for the
+## whole map: this junction is shifted so that the map's clock lands on the start
+## of the next phase's green right now. Every junction that has never been
+## preempted keeps an offset of zero and stays in step with every other.
+func _resume_cycle(entry: Dictionary) -> void:
+	resolve_balance()
+	var leg: float = (
+		balance.signal_green_time + balance.signal_amber_time + balance.signal_all_red_time
+	)
+	var next_phase: int = (int(entry["approach_phase"]) + 1) % 2
+	entry["offset"] = fposmod(float(next_phase) * leg - clock, cycle_length())
+	entry["preempt"] = Preempt.NONE
+	entry["preempt_elapsed"] = 0.0
+	entry["approach_phase"] = -1
+	entry["amber_phases"] = {}
+
+
+func _advance_preempt(delta: float) -> void:
+	resolve_balance()
+	for entry in _signals:
+		var node: int = int(entry["node"])
+		entry["preempt_elapsed"] = float(entry["preempt_elapsed"]) + delta
+		var elapsed: float = float(entry["preempt_elapsed"])
+		match int(entry["preempt"]):
+			Preempt.NONE:
+				if _approaching.has(node):
+					_begin_preempt(entry, int(_approaching[node]))
+			Preempt.CLEARING:
+				if elapsed >= balance.signal_amber_time:
+					_set_preempt(entry, Preempt.ALL_RED)
+			Preempt.ALL_RED:
+				if elapsed >= balance.signal_all_red_time:
+					_set_preempt(entry, Preempt.GREEN)
+			Preempt.GREEN:
+				# The engine is past, or the siren went off. Either way this
+				# junction is no longer being approached and the hold begins.
+				if not _approaching.has(node):
+					_set_preempt(entry, Preempt.HOLD)
+			Preempt.HOLD:
+				if _approaching.has(node):
+					# Back again. A second approach inside the hold simply keeps
+					# the green rather than restarting the sequence.
+					_set_preempt(entry, Preempt.GREEN)
+				elif elapsed >= balance.signal_preempt_resume_hold:
+					_resume_cycle(entry)
+
+
+## The clock, the scan and the sequences, in one call, so a test can step the
+## whole system without a scene tree. _process is a one-line caller.
+func advance(delta: float) -> void:
+	resolve_balance()
+	clock = fposmod(clock + delta, cycle_length())
+	_scan_due -= delta
+	if _scan_due <= 0.0:
+		_scan_due = PREEMPT_SCAN_INTERVAL
+		_approaching = scan_for_approaches(balance.signal_preempt_distance)
+	_advance_preempt(delta)
 
 
 func _build_signal(junction: Dictionary) -> void:
@@ -231,6 +536,7 @@ func _build_signal(junction: Dictionary) -> void:
 		var to_the_right: Vector2 = LaneGraph.right_of(approach)
 		heads.append({
 			"edge_index": int(arm["edge_index"]),
+			"width": float(arm["width"]),
 			"phase": phases[index],
 			"heading": approach,
 			"position": (
@@ -244,6 +550,18 @@ func _build_signal(junction: Dictionary) -> void:
 		"node": int(junction["node"]),
 		"position": here,
 		"heads": heads,
+		# Preemption state, all of it. A junction the engine never approaches
+		# keeps these at their defaults for the whole shift and runs off the one
+		# map-wide clock exactly as it did before preemption existed.
+		"preempt": Preempt.NONE,
+		"preempt_elapsed": 0.0,
+		"approach_phase": -1,
+		"amber_phases": {},
+		# Added to the map-wide clock for this junction alone, and set once, on
+		# the way out of a preemption, so the cycle resumes from the phase after
+		# the engine's. Zero everywhere else, which is why every junction that
+		# has never been preempted is still in step with every other.
+		"offset": 0.0,
 	})
 
 
@@ -276,13 +594,14 @@ func _build_stop_signs(junction: Dictionary) -> void:
 func _process(delta: float) -> void:
 	if _signals.is_empty():
 		return
-	clock = fposmod(clock + delta, cycle_length())
+	advance(delta)
 	queue_redraw()
 
 
 func _draw() -> void:
 	for entry in _signals:
 		for head in entry["heads"]:
+			head["lit"] = light_for_junction_phase(entry, int(head["phase"]))
 			_draw_head(head)
 	for sign_entry in _stop_signs:
 		_draw_stop_sign(sign_entry)
@@ -322,7 +641,7 @@ func _draw_head(head: Dictionary) -> void:
 		HEAD_EDGE, 2.0
 	)
 
-	var lit: int = light_for_phase(int(head["phase"]))
+	var lit: int = int(head["lit"])
 	var lamps: Array = [
 		[Light.RED, LAMP_RED, across * 0.58],
 		[Light.AMBER, LAMP_AMBER, 0.0],

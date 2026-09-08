@@ -355,6 +355,13 @@ func _physics_process(delta: float) -> void:
 	)
 	_truck.set_drive_intent(throttle, steering, Input.is_action_pressed("handbrake"))
 
+	# Where the engine is and whether its siren is on, for signal preemption.
+	# Pushed rather than pulled: TrafficSignals is not given the truck, because
+	# this node is the one that knows about both of them.
+	_signals.set_engine_state(
+		_truck.global_position, _truck.get_forward(), _truck.siren_active
+	)
+
 	# get_global_mouse_position() on a CanvasItem already accounts for the
 	# canvas transform, so this is the world point under the cursor with the
 	# camera wherever it currently is. Reading the raw viewport mouse position
