@@ -99,6 +99,61 @@ along the line from the middle of the screen, and disappears the moment the
 fire itself is on screen, where a marker hangs over the burning building
 instead.
 
+## Traffic, and the Siren
+
+**Getting to the fire through traffic without hitting anyone is the driving
+game.** The siren is the tool that opens gaps, and everything below exists to
+make that one sentence true.
+
+Cars drive the lane network the roads derive: two lanes to a street, one each
+way, with turns curving across every junction. They keep to a class speed and a
+following gap, stop on a red, stop on an amber unless they are already too close
+to stop, wait at a stop sign for the road they are joining, give way to the right
+where nothing controls the junction, and never enter a junction they cannot
+clear. Cars never collide with each other; the following rule is what keeps them
+apart, and it is a better rule than contact resolution because a driver who
+simply does not run into the car in front never needs getting unstuck.
+
+**Cars are solid to the engine.** They sit on their own physics layer, which the
+engine's mask includes, so a car in the road is a thing in the road. A crawl into
+one is free, on the same threshold that makes a crawl into a fence free. Above it
+the engine loses condition at four tenths of what a wall costs, and loses speed
+in proportion to how square the hit was: a T-bone is very nearly a dead stop, a
+flank brushing a flank scrubs almost nothing. The struck car is shoved a short
+way, stops, and puts its hazards on, and a glyph appears beside the condition bar
+for a second so a contact is never something the player only infers from a
+number. The engine may use the oncoming lane and the sidewalk to get past
+anything; nothing stops it, and no signal ever applies to it.
+
+With the siren on, drivers inside the perceive distance do what the DMV says.
+Each takes half a second to two seconds to notice, from the shift's own seed,
+then indicates, drifts to the right edge of the lane or onto the sidewalk over
+about a second, stops, and waits until the engine is past plus a second or two.
+Oncoming traffic does the same on its own side. A car already in a junction
+clears through it rather than stopping across the mouth, and a car stopped at a
+red stays stopped: yielding never puts a car anywhere a light says it may not go.
+
+**About one driver in ten has one thing wrong with them**, a different set every
+shift. One does not notice until the engine is close. One freezes in the lane
+instead of pulling over. One pulls left. One is committed to a left turn and
+takes up the turn position anyway. With the siren off, most drivers ignore the
+engine entirely and about one in five still pulls over for one close behind.
+
+**Signals are preempted by the siren, and the delay is the point.** A signalled
+junction the engine is approaching, inside the preempt distance, clears its cross
+traffic for it: the arms that were moving take an amber, then every arm is red,
+and only then does the engine's arm go green. That is four seconds, and a
+flat-out engine covers a thousand units in four seconds, so arriving fast means
+arriving into cross traffic that has not finished stopping. There is no
+confirmation light. After the engine is past, the junction holds its green for a
+moment and then rejoins the cycle at the next phase.
+
+The density is light on purpose: about three cars to a screen on a through
+street, about one on a residential one, none to one on a court, and never more
+than the hard cap. Cars appear and disappear outside the view, about a screen and
+a half out, so the population around the engine stays right without anything
+being seen to arrive.
+
 ## The Map
 
 There are two maps, and the home menu asks which one before every shift. The
@@ -336,8 +391,9 @@ and into the body of the document in the same commit that builds it.
   import one without running the tool by hand, or real hydrant locations: the
   twelve on the Windsor map are invented and the game says so wherever it
   offers that map.
-- **Traffic and signals.** Moving traffic, working traffic signals, and later
-  upgrades that improve how traffic yields to the engine.
+- **Upgrades that change how traffic behaves.** A better siren, a longer
+  perceive distance, fewer flawed drivers: the vocabulary exists but no upgrade
+  buys any of it. The only purchase in the game is still the tank.
 - **Pedestrians.** People walking the neighbourhood, on the sidewalks and
   across the streets. None exist in this build; nothing walks anywhere. The
   reason it matters to write down now is that it changes a rule that is

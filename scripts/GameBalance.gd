@@ -391,3 +391,119 @@ var signal_preempt_distance: float = 900.0 # invented default, not from handoff
 ## second vehicle on the same arm is not caught by the light snapping back, and
 ## short enough that cross traffic is not left sitting at a red nobody needs.
 var signal_preempt_resume_hold: float = 2.0 # invented default, not from handoff
+
+
+# ---------------------------------------------------------------------------
+# Traffic (Milestone 10 Part 3)
+# ---------------------------------------------------------------------------
+
+## Hard ceiling on cars alive at once, whatever the density rule asks for.
+## Twenty-four is about three screens' worth on the busiest street Windsor has,
+## and it is the number the frame-time budget was measured against.
+var traffic_max_vehicles: int = 24 # invented default, not from handoff
+
+## Cars per 1,000 units of lane, by road class. A screen at the default zoom is
+## about 1,420 world units across, so these are "about three cars per screen on
+## a tertiary street, about one on a residential, and none to one on a court",
+## which is the density James asked for: enough that the road is used, not so
+## much that getting through it is a puzzle.
+##
+## Counted per LANE, and a road carries two, so a residential street shows about
+## one car per screen in each direction.
+var traffic_density_major: float = 3.40 # invented default, not from handoff
+var traffic_density_residential: float = 1.15 # invented default, not from handoff
+var traffic_density_court: float = 0.40 # invented default, not from handoff
+
+## Cruising speed by road class, world units/second. All well under the engine's
+## 250: the point of the siren is that it lets the player past traffic, and
+## traffic that kept up would make it pointless.
+var traffic_speed_major: float = 165.0 # invented default, not from handoff
+var traffic_speed_residential: float = 125.0 # invented default, not from handoff
+var traffic_speed_court: float = 85.0 # invented default, not from handoff
+
+## Ordinary acceleration and braking for a car, world units/second^2, and the
+## harder braking a driver uses when something has gone wrong.
+var traffic_acceleration: float = 130.0 # invented default, not from handoff
+var traffic_braking: float = 260.0 # invented default, not from handoff
+var traffic_emergency_braking: float = 420.0 # invented default, not from handoff
+
+## The gap a driver keeps to the car in front, bumper to bumper, world units.
+## A car is 62 long, so this is a little over half a car length at a stand and
+## is what stops a queue at a red from reading as one long vehicle.
+var traffic_following_gap: float = 42.0 # invented default, not from handoff
+
+## How long a car sits at a stop sign before it may go, seconds, on top of
+## whatever waiting for cross traffic costs it.
+var traffic_stop_sign_wait: float = 0.9 # invented default, not from handoff
+
+## How far from the engine a driver can hear the siren, world units. The same
+## number as signal_preempt_distance on purpose: the junction ahead starts
+## clearing at the moment the cars around the engine start pulling over, so the
+## two halves of "the siren opens a gap" begin together.
+var traffic_perceive_distance: float = 900.0 # invented default, not from handoff
+
+## How long a driver takes to react to the siren, seconds, drawn per driver from
+## the shift's seed. The spread is the whole texture of the traffic: at 0.5 the
+## car is out of the way before the engine is near, and at 2.0 it is still in
+## the lane when the engine arrives.
+var traffic_reaction_min: float = 0.5 # invented default, not from handoff
+var traffic_reaction_max: float = 2.0 # invented default, not from handoff
+
+## How long after the engine has passed a driver waits before pulling out again,
+## seconds, also per driver from the seed.
+var traffic_clear_delay_min: float = 1.0 # invented default, not from handoff
+var traffic_clear_delay_max: float = 2.0 # invented default, not from handoff
+
+## How far to the side a yielding car moves, world units. A residential lane is
+## 70 wide and the sidewalk is beyond the kerb, so this puts a car on the edge
+## of the carriageway with its nearside wheels on the concrete, which is what
+## pulling over looks like and is exactly the strip the engine is allowed to
+## drive on.
+var traffic_yield_offset: float = 62.0 # invented default, not from handoff
+
+## How long the move to the side takes, seconds.
+var traffic_yield_move_time: float = 1.0 # invented default, not from handoff
+
+## The share of drivers on a shift who get one flaw, and the share of the rest
+## who pull over for a close engine even with the siren off.
+##
+## About one in ten and about one in five, a different set every shift from the
+## seed. The flawed driver is the reason the road cannot be read once and then
+## trusted: three junctions of well-behaved traffic and then one car that
+## freezes in the lane is a different game from three junctions of well-behaved
+## traffic.
+var traffic_imperfect_share: float = 0.1 # invented default, not from handoff
+var traffic_courtesy_share: float = 0.2 # invented default, not from handoff
+
+## How close the engine has to be before a driver with the late-notice flaw
+## hears it at all, world units.
+var traffic_late_notice_distance: float = 300.0 # invented default, not from handoff
+
+## How far outside the view cars are spawned and despawned, in SCREEN HEIGHTS at
+## the zoom in use. In screens rather than world units for the same reason the
+## camera's overscan is: the question is whether the player can see it happen,
+## and the same world distance is a different fraction of the frame at each of
+## the three zoom levels.
+var traffic_spawn_screens: float = 1.5 # invented default, not from handoff
+
+## Despawn reaches further out than spawning does, as a multiple of the spawn
+## distance, so a car near the boundary is not spawned and killed on alternate
+## frames as the engine rocks back and forth.
+var traffic_despawn_factor: float = 1.35 # invented default, not from handoff
+
+# ---------------------------------------------------------------------------
+# Hitting a car (Milestone 10 Part 3)
+# ---------------------------------------------------------------------------
+
+## What hitting a car costs against what hitting a wall costs, as a fraction.
+## Same threshold, same squared curve, same cooldown: a crawl into a car is free
+## exactly as a crawl into a fence is, and a flat-out T-bone costs 19 condition
+## against a wall's 48. Lower because the car gives, and because the engine is
+## allowed to use the other side of the road and the sidewalk to avoid this: a
+## crash that ended a shift outright would make traffic a wall with a paint job.
+var car_collision_damage_scale: float = 0.4 # invented default, not from handoff
+
+## How far a struck car is shoved, world units, at a square flat-out hit, and
+## less in proportion below that. Two thirds of a car length: enough to read as
+## being hit and not so far that the car ends up somewhere it could not be.
+var car_shove_distance: float = 42.0 # invented default, not from handoff

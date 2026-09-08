@@ -117,6 +117,7 @@ func _run() -> void:
 	await _group_results_and_shop()
 	await _group_world_closeups()
 	await _group_zoom_comparison()
+	await _group_traffic()
 	await _group_overviews()
 	await _group_narrow()
 
@@ -832,6 +833,140 @@ func _group_world_closeups() -> void:
 	main.load_map(WINDSOR_MAP)
 	await physics_frame
 	ui._hud.visible = true
+
+
+# ---------------------------------------------------------------------------
+# Group 4b: traffic
+# ---------------------------------------------------------------------------
+
+## The two shots the traffic exists for: a street full of cars getting out of
+## the way, and a junction part way through clearing itself for the engine.
+##
+## Driven, not staged. The truck is put on a street with its siren on and the
+## real TrafficSystem is left to spawn the real density around it; the seed is
+## fixed so the same cars appear every time this pack is regenerated. What the
+## PNG shows is what the rules did, which is the only thing worth looking at.
+const TRAFFIC_SHOT_SEED: int = 20260908
+
+
+func _group_traffic() -> void:
+	var traffic: TrafficSystem = main.get_node("Traffic")
+	session.start_shift()
+	await physics_frame
+	ui._hud.visible = true
+
+	for entry in [
+		{"map": WINDSOR_MAP, "name": "38_traffic_yielding"},
+		{"map": ELM_GROVE_MAP, "name": "41_traffic_elm_grove"},
+	]:
+		main.load_map(String(entry["map"]))
+		await physics_frame
+		# A shift, so the HUD in these shots is a HUD during a call rather than
+		# one reading "Time left none" over a street full of traffic.
+		session.start_shift()
+		await physics_frame
+		traffic.start_shift(TRAFFIC_SHOT_SEED)
+		camera.set_zoom_level(0.9)
+		# The middle of the map, on the road nearest to it. A street's own
+		# midpoint is wherever the data put it and on both maps that turned out
+		# to be against the boundary; the station is in a corner on Elm Grove.
+		# The middle of the neighbourhood is where the traffic is.
+		var middle: Dictionary = _central_road_point()
+		await _place_truck(Vector2(middle["position"]), float(middle["heading"]))
+		main._set_siren(true)
+		# Six seconds of real driving rules: long enough for the density to fill
+		# the street in and for the slowest reaction the seed hands out to have
+		# moved its car over.
+		await _run_traffic(traffic, 6.0)
+		await _refresh_hud()
+		await _shot(String(entry["name"]))
+
+	# The junction, mid-sequence. The engine is placed on an approach arm inside
+	# the preempt range with its siren on, and the shot is taken while the cross
+	# arms are clearing: an amber on the cross road and a red still on the
+	# engine's own arm is the moment the delay is visible.
+	main.load_map(WINDSOR_MAP)
+	await physics_frame
+	traffic.start_shift(TRAFFIC_SHOT_SEED)
+	var signals: TrafficSignals = main.get_node("TrafficSignals")
+	var lanes: LaneGraph = main._map_builder.get_lane_graph()
+	var approach: Dictionary = _signal_approach(lanes)
+	if approach.is_empty():
+		_skip("39_preempt_junction", "no signalled junction with a long enough approach")
+	else:
+		camera.set_zoom_level(0.8)
+		await _place_truck(Vector2(approach["position"]), float(approach["heading"]))
+		main._set_siren(true)
+		await _run_traffic(traffic, 2.4)
+		await _refresh_hud()
+		await _shot("39_preempt_junction")
+		main._set_siren(false)
+
+	main.load_map(WINDSOR_MAP)
+	await physics_frame
+	ui._hud.visible = true
+
+
+## Runs the world for a while with the engine's state pushed into the two
+## systems Main would normally push it into. This tool switches Main's own
+## _physics_process off, exactly as the physics runner does, so without this the
+## traffic would be driving around an engine it believed was at the origin.
+func _run_traffic(traffic: TrafficSystem, seconds: float) -> void:
+	var signals: TrafficSignals = main.get_node("TrafficSignals")
+	for _frame in range(int(seconds * 60.0)):
+		traffic.set_engine_state(
+			truck.global_position, truck.get_forward(), truck.siren_active
+		)
+		signals.set_engine_state(
+			truck.global_position, truck.get_forward(), truck.siren_active
+		)
+		await physics_frame
+
+
+## The road nearest the middle of the map, and the heading along it there.
+func _central_road_point() -> Dictionary:
+	var graph: RoadGraph = main._map_builder.get_road_graph()
+	var middle: Vector2 = main.get_map_definition().world_bounds.get_center()
+	if graph == null or graph.edges.is_empty():
+		return {"position": middle, "heading": 0.0}
+	var best: int = 0
+	var nearest: float = INF
+	for index in range(graph.edges.size()):
+		var edge: Dictionary = graph.edges[index]
+		var a: Vector2 = graph.positions[int(edge["a"])]
+		var b: Vector2 = graph.positions[int(edge["b"])]
+		var at: float = (a + b).distance_to(middle * 2.0) * 0.5
+		if at < nearest:
+			nearest = at
+			best = index
+	var edge_here: Dictionary = graph.edges[best]
+	var from: Vector2 = graph.positions[int(edge_here["a"])]
+	var to: Vector2 = graph.positions[int(edge_here["b"])]
+	return {
+		"position": (from + to) * 0.5,
+		"heading": (to - from).angle(),
+	}
+
+
+## A point on an approach to a signalled junction, far enough back to be inside
+## the preempt range and near enough that the sequence has started.
+func _signal_approach(lanes: LaneGraph) -> Dictionary:
+	if lanes == null:
+		return {}
+	for index in range(lanes.lanes.size()):
+		var lane: Dictionary = lanes.lanes[index]
+		if lanes.get_control(int(lane["to_node"])) != LaneGraph.JunctionControl.SIGNAL:
+			continue
+		if float(lane["length"]) < 400.0:
+			continue
+		var length: float = float(lane["length"])
+		return {
+			"position": Vector2(lane["entry"]).lerp(
+				Vector2(lane["exit"]), (length - 240.0) / length
+			),
+			"heading": Vector2(lane["heading"]).angle(),
+		}
+	return {}
 
 
 # ---------------------------------------------------------------------------

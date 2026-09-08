@@ -82,6 +82,19 @@ var _results_bonus_row: Array
 var _results_banked_row: Array
 var _shop_back_button: Button
 
+## The contact glyph: a car outline with a burst on its corner, shown for
+## CONTACT_GLYPH_SECONDS beside the condition bar whenever the engine touches a
+## car. Shown for EVERY contact, including the free ones under the damage
+## threshold: the condition bar says what it cost, and the glyph says it
+## happened at all.
+const CONTACT_GLYPH_SIZE: Vector2 = Vector2(26.0, 20.0)
+const CONTACT_GLYPH_SECONDS: float = 1.0
+const CONTACT_GLYPH_COLOR: Color = Color(0.96, 0.72, 0.28)
+const CONTACT_GLYPH_BODY: Color = Color(0.86, 0.88, 0.90)
+
+var _contact_glyph: Control
+var _contact_remaining: float = 0.0
+
 var _arrow: Control
 var _arrow_direction: Vector2 = Vector2.ZERO
 var _arrow_position: Vector2 = Vector2.ZERO
@@ -153,6 +166,14 @@ func _build_hud() -> void:
 	_condition_label = _make_label("100")
 	condition_row.add_child(_condition_bar)
 	condition_row.add_child(_condition_label)
+	# The contact glyph, beside the condition bar because that is the bar it is
+	# about. It occupies its own fixed slot whether or not it is showing, so a
+	# contact never reflows the row it sits in.
+	_contact_glyph = Control.new()
+	_contact_glyph.custom_minimum_size = CONTACT_GLYPH_SIZE
+	_contact_glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_contact_glyph.draw.connect(_draw_contact_glyph)
+	condition_row.add_child(_contact_glyph)
 	left.add_child(condition_row)
 
 	left.add_child(_make_eyebrow("Water"))
@@ -628,6 +649,50 @@ static func format_credits(amount: int) -> String:
 # ---------------------------------------------------------------------------
 # HUD updates
 # ---------------------------------------------------------------------------
+
+## The engine has touched a car. Puts the glyph up for about a second.
+func flash_contact() -> void:
+	_contact_remaining = CONTACT_GLYPH_SECONDS
+	if _contact_glyph != null:
+		_contact_glyph.queue_redraw()
+
+
+func is_contact_showing() -> bool:
+	return _contact_remaining > 0.0
+
+
+func _process(delta: float) -> void:
+	if _contact_remaining <= 0.0:
+		return
+	_contact_remaining = maxf(_contact_remaining - delta, 0.0)
+	if _contact_glyph != null:
+		_contact_glyph.queue_redraw()
+
+
+## A small car seen from above with a burst on its front corner. Drawn rather
+## than written because it sits inside a row of numbers and one more word there
+## would read as another label.
+func _draw_contact_glyph() -> void:
+	if _contact_remaining <= 0.0:
+		return
+	# Fades out over the last half of its life, so it leaves rather than blinks.
+	var fade: float = clampf(_contact_remaining / (CONTACT_GLYPH_SECONDS * 0.5), 0.0, 1.0)
+	var middle: Vector2 = CONTACT_GLYPH_SIZE * 0.5
+	var body := Rect2(middle - Vector2(9.0, 5.0), Vector2(18.0, 10.0))
+	_contact_glyph.draw_rect(body, Color(CONTACT_GLYPH_BODY, 0.8 * fade))
+	_contact_glyph.draw_rect(
+		Rect2(middle - Vector2(3.0, 3.5), Vector2(7.0, 7.0)),
+		Color(0.30, 0.33, 0.37, 0.85 * fade)
+	)
+	# The burst: four spikes off the nearside front corner.
+	var corner: Vector2 = middle + Vector2(9.0, -5.0)
+	for step in range(4):
+		var angle: float = -PI * 0.5 + float(step) * (PI / 6.0) - PI / 12.0
+		_contact_glyph.draw_line(
+			corner, corner + Vector2(cos(angle), sin(angle)) * 7.0,
+			Color(CONTACT_GLYPH_COLOR, fade), 2.0
+		)
+
 
 func set_condition(condition: float, max_condition: float) -> void:
 	_condition_bar.value = 0.0 if max_condition <= 0.0 else condition / max_condition

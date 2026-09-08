@@ -15,6 +15,12 @@ signal condition_changed(condition: float, max_condition: float)
 signal truck_damaged(amount: float, impact_speed: float)
 signal truck_destroyed
 
+## Emitted when the engine hits a car, whatever it cost. Separate from
+## truck_damaged because a bump under the threshold costs nothing and must still
+## put the contact glyph on the screen: the player has to be told they hit
+## somebody even when the paperwork is free.
+signal struck_a_vehicle(car: Node, impact_speed: float, squareness: float)
+
 ## Speed at which steering reaches full authority. Below this the truck turns
 ## proportionally less, so it cannot pirouette on the spot (handoff section 4).
 const STEERING_AUTHORITY_SPEED: float = 40.0
@@ -37,6 +43,14 @@ var _throttle: float = 0.0
 var _steering: float = 0.0
 var _brake: bool = false
 var _contact_cooldown: float = 0.0
+## A car contact is one EVENT, not one per frame of touching.
+##
+## Written after watching a graze cost everything: the speed a square hit takes
+## away was being applied on every frame the bodies were still touching, so a
+## glancing pass along a car's side, which should scrub almost nothing, decayed
+## the engine to a standstill over a dozen frames. The shove, the glyph and the
+## speed all fire once and then wait this out.
+var _vehicle_contact_cooldown: float = 0.0
 var _destroyed_emitted: bool = false
 
 
@@ -106,9 +120,19 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 
 	tick_contact_cooldown(delta)
-	var impact_speed: float = _strongest_impact_speed(pre_move_velocity)
+	# Walls and cars are read from the same contact list and priced by different
+	# rules, so the two are gathered in one pass and settled separately.
+	var contact: Dictionary = _read_contacts(pre_move_velocity)
+	var impact_speed: float = float(contact["wall_speed"])
 	if impact_speed > 0.0:
 		register_wall_contact(impact_speed)
+	var car: Node = contact["car"]
+	var hit_a_car: bool = car != null and _vehicle_contact_cooldown <= 0.0
+	if hit_a_car:
+		_vehicle_contact_cooldown = balance.collision_contact_cooldown
+		register_car_contact(
+			car, float(contact["car_speed"]), float(contact["car_squareness"])
+		)
 
 	# Adopt the motion that actually happened as this body's velocity.
 	#
@@ -135,6 +159,15 @@ func _physics_process(delta: float) -> void:
 	if real_velocity.length() > entry_speed:
 		real_velocity = real_velocity.normalized() * entry_speed
 	velocity = real_velocity
+
+	# What hitting a car costs in SPEED, applied after the reconciliation above
+	# so it is a scale on the motion that actually happened rather than on the
+	# motion that was asked for. How square the hit was decides it: a T-bone
+	# takes nearly all of it, a glancing blow scrubs a little and the engine
+	# carries on down the road. That is the difference between traffic being an
+	# obstacle to drive round and traffic being a wall with a paint job.
+	if hit_a_car:
+		velocity *= clampf(1.0 - float(contact["car_squareness"]), 0.0, 1.0)
 
 
 func _apply_steering(delta: float) -> void:
@@ -202,18 +235,85 @@ func _apply_drive(delta: float) -> void:
 ## second, far under the damage threshold. A glancing blow is still cheap too,
 ## because only the component into the normal counts.
 func _strongest_impact_speed(pre_move_velocity: Vector2) -> float:
-	var strongest: float = 0.0
+	return float(_read_contacts(pre_move_velocity)["wall_speed"])
+
+
+## Every slide contact this frame, sorted into the two things a contact can be.
+##
+## Returns {wall_speed, car, car_speed, car_squareness}. wall_speed is the
+## strongest arrival speed into anything that is not a car; car is the car hit
+## hardest, if any, with its own arrival speed and how square the hit was.
+##
+## SQUARENESS is the dot of the engine's direction of travel with the contact
+## normal, so it is 1 for driving straight into a car's flank and near 0 for
+## brushing along it. It prices both the speed lost and, through
+## car_shove_distance, how far the car is knocked.
+func _read_contacts(pre_move_velocity: Vector2) -> Dictionary:
+	var result: Dictionary = {
+		"wall_speed": 0.0, "car": null, "car_speed": 0.0, "car_squareness": 0.0,
+	}
+	var direction: Vector2 = pre_move_velocity.normalized()
 	for index in range(get_slide_collision_count()):
 		var collision: KinematicCollision2D = get_slide_collision(index)
 		var normal: Vector2 = collision.get_normal()
-		strongest = maxf(strongest, maxf(-pre_move_velocity.dot(normal), 0.0))
-	return strongest
+		var into: float = maxf(-pre_move_velocity.dot(normal), 0.0)
+		var collider: Object = collision.get_collider()
+		if collider is TrafficCar:
+			if into > float(result["car_speed"]):
+				result["car"] = collider
+				result["car_speed"] = into
+				result["car_squareness"] = clampf(absf(direction.dot(normal)), 0.0, 1.0)
+			continue
+		result["wall_speed"] = maxf(float(result["wall_speed"]), into)
+	return result
+
+
+## Hitting a car. Reported always, charged sometimes.
+##
+## The charge is the wall rule scaled by car_collision_damage_scale, with the
+## same threshold and the same cooldown, so a crawl into a car is free exactly as
+## a crawl into a fence is. The car is shoved a short way along the line of the
+## hit, in proportion to how square and how fast it was, and stops with its
+## hazards on.
+func register_car_contact(car: Node, impact_speed: float, squareness: float) -> float:
+	resolve_balance()
+	if car != null and car.has_method("knock"):
+		var shove: float = (
+			balance.car_shove_distance
+			* squareness
+			* clampf(impact_speed / balance.forward_max_speed, 0.0, 1.0)
+		)
+		var direction: Vector2 = velocity.normalized()
+		if direction == Vector2.ZERO:
+			direction = get_forward()
+		car.knock(direction, shove)
+
+	struck_a_vehicle.emit(car, impact_speed, squareness)
+
+	if impact_speed < balance.collision_damage_threshold:
+		return 0.0
+	if _contact_cooldown > 0.0:
+		return 0.0
+	var damage: float = damage_for_impact(impact_speed) * balance.car_collision_damage_scale
+	if damage <= 0.0:
+		return 0.0
+
+	condition = maxf(condition - damage, 0.0)
+	_contact_cooldown = balance.collision_contact_cooldown
+	truck_damaged.emit(damage, impact_speed)
+	condition_changed.emit(condition, max_condition)
+
+	if condition <= 0.0 and not _destroyed_emitted:
+		_destroyed_emitted = true
+		truck_destroyed.emit()
+	return damage
 
 
 ## Ticked every physics frame whether or not anything was touched, so the
 ## cooldown cannot be held open by simply not colliding.
 func tick_contact_cooldown(delta: float) -> void:
 	_contact_cooldown = maxf(_contact_cooldown - delta, 0.0)
+	_vehicle_contact_cooldown = maxf(_vehicle_contact_cooldown - delta, 0.0)
 
 
 ## What an impact at this speed costs, in condition.
@@ -270,6 +370,7 @@ func reset_for_new_shift(spawn_position: Vector2, spawn_heading: float) -> void:
 	max_condition = balance.truck_starting_condition
 	condition = max_condition
 	_contact_cooldown = 0.0
+	_vehicle_contact_cooldown = 0.0
 	_destroyed_emitted = false
 	_throttle = 0.0
 	_steering = 0.0

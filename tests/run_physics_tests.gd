@@ -96,6 +96,16 @@ func _run() -> void:
 	await _check_the_minimap_toggle_holds_across_a_change_of_map()
 	await _check_the_minimap_zoom_never_moves_the_camera_zoom()
 	await _check_the_signals_run_pause_and_reset_with_the_shift()
+	await _check_a_car_obeys_a_red_and_goes_on_the_green()
+	await _check_a_car_stops_at_a_stop_sign_and_then_goes()
+	await _check_a_queue_at_a_red_does_not_overlap()
+	await _check_a_car_ahead_of_the_siren_pulls_over_and_comes_back()
+	await _check_oncoming_traffic_pulls_over_on_its_own_side()
+	await _check_a_car_at_a_red_stays_put_as_the_engine_crosses()
+	await _check_the_car_that_just_got_its_green_does_not_meet_the_engine()
+	await _check_the_siren_is_what_makes_a_car_pull_over()
+	await _check_hitting_a_car_square_stops_the_engine_and_a_graze_does_not()
+	await _check_a_windsor_shift_pays_out_with_traffic_on_the_road()
 
 	print("---")
 	print("%d physics check(s): %d passed, %d failed" % [
@@ -106,6 +116,130 @@ func _run() -> void:
 		quit(1)
 		return
 	quit(1 if _failures.size() > 0 else 0)
+
+
+## The seed every traffic check runs on, so the same drivers with the same
+## reaction times appear every time the suite is run.
+const TRAFFIC_SEED: int = 20260908
+
+## A world with the traffic system started and the density rule switched off, so
+## the only cars on the map are the ones the check puts there.
+## Returns [main, truck, traffic, signals, lanes].
+func _make_traffic_world(map_path: String = WINDSOR_MAP) -> Array:
+	var world: Array = await _make_world(map_path)
+	var main: Node = world[0]
+	var truck: Node = world[1]
+	var traffic: TrafficSystem = main.get_node("Traffic")
+	var signals: TrafficSignals = main.get_node("TrafficSignals")
+	traffic.ambient_spawning = false
+	# A screen big enough that nothing a check places is ever retired for being
+	# far from the engine. These checks are about how a car behaves, not about
+	# where cars appear; the density and the spawn boundary have their own check
+	# and it runs on the real screen height.
+	traffic.set_screen_height(6000.0)
+	traffic.start_shift(TRAFFIC_SEED)
+	return [main, truck, traffic, signals, main._map_builder.get_lane_graph()]
+
+
+## Drives the engine at a point and then stops it there, rather than holding the
+## throttle down until it runs into whatever is past the junction. Returns the
+## number of frames actually run.
+func _drive_engine_at(main: Node, target: Vector2, frames: int) -> void:
+	var traffic: TrafficSystem = main.get_node("Traffic")
+	var signals: TrafficSignals = main.get_node("TrafficSignals")
+	var truck: TruckController = main.get_node("Truck")
+	for _frame in range(frames):
+		traffic.set_engine_state(
+			truck.global_position, truck.get_forward(), truck.siren_active
+		)
+		signals.set_engine_state(
+			truck.global_position, truck.get_forward(), truck.siren_active
+		)
+		# Throttle while the target is still ahead, brake once it is behind, so
+		# the engine crosses the junction and stops rather than carrying on into
+		# the far end of the map.
+		var ahead: float = (target - truck.global_position).dot(truck.get_forward())
+		truck.set_drive_intent(1.0 if ahead > 0.0 else -1.0, 0.0, false)
+		await physics_frame
+
+
+## Steps the world, pushing the engine's state into the two systems Main would
+## normally push it into. Main's own _physics_process is switched off in every
+## world this suite builds, so without this the traffic would be driving around
+## an engine it believed was at the origin with its siren off.
+##
+## hold_clock, when given, is written back onto the signal clock after every
+## frame, which pins a junction on one light for as long as the loop runs.
+func _step_traffic(
+	main: Node, frames: int, hold_clock: float = -1.0, throttle: float = 0.0
+) -> void:
+	var traffic: TrafficSystem = main.get_node("Traffic")
+	var signals: TrafficSignals = main.get_node("TrafficSignals")
+	var truck: TruckController = main.get_node("Truck")
+	for _frame in range(frames):
+		traffic.set_engine_state(
+			truck.global_position, truck.get_forward(), truck.siren_active
+		)
+		signals.set_engine_state(
+			truck.global_position, truck.get_forward(), truck.siren_active
+		)
+		if not is_zero_approx(throttle):
+			truck.set_drive_intent(throttle, 0.0, false)
+		await physics_frame
+		if hold_clock >= 0.0:
+			signals.clock = hold_clock
+
+
+## A lane that arrives at a signalled junction, at least this long.
+func _lane_into_a_signal(lanes: LaneGraph, min_length: float) -> int:
+	for index in range(lanes.lanes.size()):
+		var lane: Dictionary = lanes.lanes[index]
+		if lanes.get_control(int(lane["to_node"])) != LaneGraph.JunctionControl.SIGNAL:
+			continue
+		if float(lane["length"]) >= min_length:
+			return index
+	return -1
+
+
+## A lane that arrives at a stop sign on its own arm, at least this long.
+func _lane_into_a_stop_sign(lanes: LaneGraph, min_length: float) -> int:
+	for index in range(lanes.lanes.size()):
+		var lane: Dictionary = lanes.lanes[index]
+		if not lanes.arm_has_stop_sign(int(lane["to_node"]), int(lane["edge_index"])):
+			continue
+		if float(lane["length"]) >= min_length:
+			return index
+	return -1
+
+
+## A clock value at which this arm shows the light asked for, and keeps showing
+## it for at least hold seconds. Returns -1 when the cycle has no such moment,
+## which the caller asserts on rather than silently testing nothing.
+func _clock_showing(
+	signals: TrafficSignals, node: int, edge_index: int, want: int, hold: float
+) -> float:
+	var was: float = signals.clock
+	var time: float = 0.0
+	var found: float = -1.0
+	while time < signals.cycle_length():
+		signals.clock = time
+		if signals.light_for_arm(node, edge_index) == want:
+			signals.clock = time + hold
+			if signals.light_for_arm(node, edge_index) == want:
+				found = time
+				break
+		time += 0.1
+	signals.clock = was
+	return found
+
+
+## A point along a lane's own line, and the heading there.
+func _point_on_lane(lanes: LaneGraph, lane_index: int, travelled: float) -> Vector2:
+	var lane: Dictionary = lanes.lanes[lane_index]
+	var length: float = maxf(float(lane["length"]), 0.001)
+	return Vector2(lane["entry"]).lerp(
+		Vector2(lane["exit"]), clampf(travelled / length, 0.0, 1.0)
+	)
 
 
 func _check(condition: bool, message: String) -> void:
@@ -2028,6 +2162,705 @@ func _check_the_signals_run_pause_and_reset_with_the_shift() -> void:
 		"Elm Grove's sixteen crossroads are all signalled, with no stop signs (%d, %d)" % [
 			signals.get_signal_count(), signals.get_stop_sign_count()
 		]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## A red is a red and a green is a green, at a real signalled junction on the
+## real map, driven by the same code the ambient traffic uses.
+func _check_a_car_obeys_a_red_and_goes_on_the_green() -> void:
+	for map_path in [WINDSOR_MAP, ELM_GROVE_MAP]:
+		var world: Array = await _make_traffic_world(map_path)
+		var main: Node = world[0]
+		var truck: Node = world[1]
+		var traffic: TrafficSystem = world[2]
+		var signals: TrafficSignals = world[3]
+		var lanes: LaneGraph = world[4]
+		var name: String = main.get_map_definition().map_id
+
+		# The engine is parked well out of the way with its siren off, so
+		# nothing here is about preemption or yielding.
+		truck.global_position = main.get_map_definition().world_bounds.position - Vector2(
+			4000.0, 4000.0
+		)
+		truck.set_siren_active(false)
+
+		var lane_index: int = _lane_into_a_signal(lanes, 500.0)
+		_check(lane_index >= 0, "%s: a signalled junction with a 500 unit approach" % name)
+		if lane_index < 0:
+			main.queue_free()
+			await physics_frame
+			continue
+		var lane: Dictionary = lanes.lanes[lane_index]
+		var node: int = int(lane["to_node"])
+		var edge_index: int = int(lane["edge_index"])
+
+		var red_clock: float = _clock_showing(
+			signals, node, edge_index, TrafficSignals.Light.RED, 8.0
+		)
+		_check(red_clock >= 0.0, "%s: that arm is red for eight seconds somewhere" % name)
+		if red_clock < 0.0:
+			main.queue_free()
+			await physics_frame
+			continue
+
+		signals.clock = red_clock
+		var car: TrafficCar = traffic.spawn_car_on(lane_index, float(lane["length"]) - 400.0)
+		await _step_traffic(main, 8 * PHYSICS_FPS, red_clock)
+
+		_check(
+			not car.is_in_junction(),
+			"%s: a car on a red does not enter the junction" % name
+		)
+		_check(
+			car.speed < 3.0,
+			"%s: and is stopped (%.1f units/s)" % [name, car.speed]
+		)
+		var to_line: float = car.distance_to_stop_line()
+		_check(
+			to_line >= 0.0 and to_line < TrafficCar.LENGTH * 2.0,
+			"%s: stopped AT the line rather than short of it (%.1f units)" % [name, to_line]
+		)
+
+		# Green, and it goes.
+		var green_clock: float = _clock_showing(
+			signals, node, edge_index, TrafficSignals.Light.GREEN, 6.0
+		)
+		_check(green_clock >= 0.0, "%s: that arm is green for six seconds somewhere" % name)
+		if green_clock >= 0.0:
+			signals.clock = green_clock
+			await _step_traffic(main, 3 * PHYSICS_FPS, green_clock)
+			_check(
+				car.speed > 30.0 or car.is_in_junction(),
+				"%s: the green sends it through (%.1f units/s, in junction %s)" % [
+					name, car.speed, str(car.is_in_junction())
+				]
+			)
+
+		main.queue_free()
+		await physics_frame
+
+
+## A stop sign is a halt, not a slow-down, and then it is a go.
+func _check_a_car_stops_at_a_stop_sign_and_then_goes() -> void:
+	var world: Array = await _make_traffic_world(WINDSOR_MAP)
+	var main: Node = world[0]
+	var truck: Node = world[1]
+	var traffic: TrafficSystem = world[2]
+	var lanes: LaneGraph = world[4]
+
+	truck.global_position = main.get_map_definition().world_bounds.position - Vector2(
+		4000.0, 4000.0
+	)
+	truck.set_siren_active(false)
+
+	var lane_index: int = _lane_into_a_stop_sign(lanes, 400.0)
+	_check(lane_index >= 0, "Windsor has a stop-signed arm with a 400 unit approach")
+	if lane_index < 0:
+		main.queue_free()
+		await physics_frame
+		return
+
+	var lane: Dictionary = lanes.lanes[lane_index]
+	var car: TrafficCar = traffic.spawn_car_on(lane_index, float(lane["length"]) - 350.0)
+
+	# Sampled every frame, not every second: the halt is short by design and a
+	# once-a-second reading walks straight past it.
+	var halted: bool = false
+	var slowest: float = INF
+	for _frame in range(6 * PHYSICS_FPS):
+		await _step_traffic(main, 1)
+		slowest = minf(slowest, car.speed)
+		if car.speed < 3.0 and not car.is_in_junction():
+			halted = true
+
+	_check(halted, "a car at a stop sign comes to a real halt (slowest %.1f units/s)" % slowest)
+	_check(
+		car.has_stopped_at_sign,
+		"and the halt is recorded rather than merely passed through"
+	)
+
+	await _step_traffic(main, 4 * PHYSICS_FPS)
+	_check(
+		car.is_in_junction() or car.speed > 25.0 or car.lane_id != lane_index,
+		"and then it goes (%.1f units/s, lane %d)" % [car.speed, car.lane_id]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## Three cars arriving at the same red. They have to end up in a line with real
+## gaps in it: the following rule is the only thing keeping them apart, because
+## cars do not collide with one another.
+func _check_a_queue_at_a_red_does_not_overlap() -> void:
+	var world: Array = await _make_traffic_world(ELM_GROVE_MAP)
+	var main: Node = world[0]
+	var truck: Node = world[1]
+	var traffic: TrafficSystem = world[2]
+	var signals: TrafficSignals = world[3]
+	var lanes: LaneGraph = world[4]
+
+	truck.global_position = main.get_map_definition().world_bounds.position - Vector2(
+		4000.0, 4000.0
+	)
+	truck.set_siren_active(false)
+
+	var lane_index: int = _lane_into_a_signal(lanes, 700.0)
+	_check(lane_index >= 0, "Elm Grove has a 700 unit approach to a signal")
+	if lane_index < 0:
+		main.queue_free()
+		await physics_frame
+		return
+	var lane: Dictionary = lanes.lanes[lane_index]
+	var node: int = int(lane["to_node"])
+	var red_clock: float = _clock_showing(
+		signals, node, int(lane["edge_index"]), TrafficSignals.Light.RED, 10.0
+	)
+	_check(red_clock >= 0.0, "and that arm holds a red for ten seconds")
+	if red_clock < 0.0:
+		main.queue_free()
+		await physics_frame
+		return
+	signals.clock = red_clock
+
+	var length: float = float(lane["length"])
+	var queue: Array[TrafficCar] = [
+		traffic.spawn_car_on(lane_index, length - 320.0),
+		traffic.spawn_car_on(lane_index, length - 480.0),
+		traffic.spawn_car_on(lane_index, length - 640.0),
+	]
+	await _step_traffic(main, 10 * PHYSICS_FPS, red_clock)
+
+	var closest: float = INF
+	for i in range(queue.size()):
+		for j in range(i + 1, queue.size()):
+			closest = minf(
+				closest, queue[i].global_position.distance_to(queue[j].global_position)
+			)
+	_check(
+		closest > TrafficCar.LENGTH,
+		"three cars at a red end up a car length apart at least (closest %.1f, body %.0f)"
+			% [closest, TrafficCar.LENGTH]
+	)
+	var all_stopped: bool = true
+	for car in queue:
+		if car.speed > 3.0 or car.is_in_junction():
+			all_stopped = false
+	_check(all_stopped, "and all three are stopped short of the junction")
+
+	main.queue_free()
+	await physics_frame
+
+
+## The thing the siren is for. A car in front of a sounding engine indicates,
+## moves to the right, stops, and pulls out again once the engine is past.
+##
+## This is one of the two checks the removal proof is aimed at: making
+## TrafficCar._yield_wants_a_stop return false always fails it.
+func _check_a_car_ahead_of_the_siren_pulls_over_and_comes_back() -> void:
+	for map_path in [WINDSOR_MAP, ELM_GROVE_MAP]:
+		var world: Array = await _make_traffic_world(map_path)
+		var main: Node = world[0]
+		var truck: TruckController = world[1]
+		var traffic: TrafficSystem = world[2]
+		var lanes: LaneGraph = world[4]
+		var name: String = main.get_map_definition().map_id
+
+		var lane_index: int = _lane_into_a_signal(lanes, 700.0)
+		if lane_index < 0:
+			lane_index = 0
+		var lane: Dictionary = lanes.lanes[lane_index]
+		var heading: Vector2 = Vector2(lane["heading"])
+
+		var car: TrafficCar = traffic.spawn_car_on(lane_index, 340.0)
+		truck.global_position = _point_on_lane(lanes, lane_index, 120.0)
+		truck.rotation = heading.angle()
+		truck.velocity = Vector2.ZERO
+		truck.set_siren_active(true)
+
+		# Long enough for the slowest reaction the seed can hand out (2.0 s) plus
+		# the second it takes to move over.
+		await _step_traffic(main, 5 * PHYSICS_FPS)
+
+		_check(
+			car.lateral > main.get_node("Traffic").balance.traffic_yield_offset * 0.7,
+			"%s: a car in front of the siren has moved to its right (%.1f units)"
+				% [name, car.lateral]
+		)
+		_check(
+			car.indicator_side() == 1,
+			"%s: with its right indicator on" % name
+		)
+		_check(
+			car.speed < 3.0,
+			"%s: and has stopped (%.1f units/s)" % [name, car.speed]
+		)
+
+		# The engine goes past. Placed on the far side rather than driven there,
+		# which is the state a drive-past produces and the one the rule reads.
+		#
+		# Sampled rather than read once at the end, because a stopped engine
+		# with its siren still on is a thing a driver keeps reacting to: the car
+		# pulls out, drives on, catches up with the parked engine, and yields to
+		# it all over again, which is correct and would make a single reading
+		# four seconds later say the opposite of what happened.
+		truck.global_position = _point_on_lane(lanes, lane_index, 340.0) + heading * 400.0
+		var least_lateral: float = INF
+		var resumed: bool = false
+		for _frame in range(5 * PHYSICS_FPS):
+			await _step_traffic(main, 1)
+			least_lateral = minf(least_lateral, car.lateral)
+			if car.yield_state == TrafficCar.Yield.NONE and car.speed > 10.0:
+				resumed = true
+
+		_check(
+			least_lateral < main.get_node("Traffic").balance.traffic_yield_offset * 0.3,
+			"%s: and pulls back out once the engine is past (%.1f units)"
+				% [name, least_lateral]
+		)
+		_check(resumed, "%s: and drives on" % name)
+
+		main.queue_free()
+		await physics_frame
+
+
+## Oncoming traffic does the same thing on its own side of the road, which is a
+## different half of the carriageway and a different direction of "right".
+func _check_oncoming_traffic_pulls_over_on_its_own_side() -> void:
+	var world: Array = await _make_traffic_world(WINDSOR_MAP)
+	var main: Node = world[0]
+	var truck: TruckController = world[1]
+	var traffic: TrafficSystem = world[2]
+	var lanes: LaneGraph = world[4]
+
+	var lane_index: int = _lane_into_a_signal(lanes, 700.0)
+	if lane_index < 0:
+		lane_index = 0
+	var lane: Dictionary = lanes.lanes[lane_index]
+
+	# The other direction on the same road segment.
+	var opposite: int = -1
+	for index in range(lanes.lanes.size()):
+		if index == lane_index:
+			continue
+		if int(lanes.lanes[index]["edge_index"]) == int(lane["edge_index"]):
+			opposite = index
+			break
+	_check(opposite >= 0, "the segment carries a lane in each direction")
+	if opposite < 0:
+		main.queue_free()
+		await physics_frame
+		return
+
+	var car: TrafficCar = traffic.spawn_car_on(opposite, 200.0)
+	var before: Vector2 = car.global_position
+
+	truck.global_position = _point_on_lane(lanes, lane_index, 120.0)
+	truck.rotation = Vector2(lane["heading"]).angle()
+	truck.velocity = Vector2.ZERO
+	truck.set_siren_active(true)
+
+	# Signed distance from the road's own centreline, on the side the ENGINE'S
+	# right hand points to. The oncoming car starts on the far side, which is a
+	# negative number, and pulling over to its own right has to make it more
+	# negative rather than less: a car that drifted towards the centreline would
+	# be pulling over into the engine.
+	var engine_right: Vector2 = LaneGraph.right_of(Vector2(lane["heading"]))
+	var centre: Vector2 = Vector2(lane["entry"])
+	var side_before: float = (before - centre).dot(engine_right)
+
+	await _step_traffic(main, 5 * PHYSICS_FPS)
+
+	var side_after: float = (car.global_position - centre).dot(engine_right)
+	_check(
+		car.lateral > traffic.balance.traffic_yield_offset * 0.7,
+		"an oncoming car pulls over to ITS right (%.1f units)" % car.lateral
+	)
+	_check(car.speed < 3.0, "and stops (%.1f units/s)" % car.speed)
+	_check(
+		side_after < side_before - 40.0,
+		"further from the centreline, not across it (%.0f units off, was %.0f)"
+			% [side_after, side_before]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## A car held at a red while the engine crosses in front of it. The red wins:
+## yielding never puts a car into a junction, and a car that pulled over into
+## the mouth of one would be worse than a car that did nothing.
+func _check_a_car_at_a_red_stays_put_as_the_engine_crosses() -> void:
+	var world: Array = await _make_traffic_world(WINDSOR_MAP)
+	var main: Node = world[0]
+	var truck: TruckController = world[1]
+	var traffic: TrafficSystem = world[2]
+	var signals: TrafficSignals = world[3]
+	var lanes: LaneGraph = world[4]
+
+	var pair: Dictionary = _crossing_arms(lanes, signals, 600.0)
+	_check(not pair.is_empty(), "Windsor has a signalled junction with two long crossing arms")
+	if pair.is_empty():
+		main.queue_free()
+		await physics_frame
+		return
+
+	var car: TrafficCar = traffic.spawn_car_on(
+		int(pair["waiting_lane"]), float(pair["waiting_length"]) - 300.0
+	)
+	var red_clock: float = _clock_showing(
+		signals, int(pair["node"]), int(pair["waiting_edge"]), TrafficSignals.Light.RED, 6.0
+	)
+	if red_clock >= 0.0:
+		signals.clock = red_clock
+
+	truck.global_position = _point_on_lane(lanes, int(pair["engine_lane"]), 60.0)
+	truck.rotation = Vector2(lanes.lanes[int(pair["engine_lane"])]["heading"]).angle()
+	truck.velocity = Vector2.ZERO
+	truck.set_siren_active(true)
+
+	var junction_at: Vector2 = lanes.junctions[int(pair["node"])]["position"]
+	var entered: bool = false
+	for _second in range(9):
+		await _drive_engine_at(main, junction_at, PHYSICS_FPS)
+		if car.is_in_junction():
+			entered = true
+	_check(
+		not entered,
+		"a car stopped at a red never enters the junction the engine is crossing"
+	)
+	_check(
+		truck.condition >= truck.max_condition,
+		"and the engine crosses without touching it (condition %.1f)" % truck.condition
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## The awkward one. A cross-street car has just been given its green and has
+## started to move when the siren arrives. Whether it stops short or clears
+## through is up to its reaction delay and how far in it is; what it may never do
+## is meet the engine.
+func _check_the_car_that_just_got_its_green_does_not_meet_the_engine() -> void:
+	var world: Array = await _make_traffic_world(WINDSOR_MAP)
+	var main: Node = world[0]
+	var truck: TruckController = world[1]
+	var traffic: TrafficSystem = world[2]
+	var signals: TrafficSignals = world[3]
+	var lanes: LaneGraph = world[4]
+
+	var pair: Dictionary = _crossing_arms(lanes, signals, 600.0)
+	if pair.is_empty():
+		main.queue_free()
+		await physics_frame
+		return
+
+	# Its green, just given.
+	var green_clock: float = _clock_showing(
+		signals, int(pair["node"]), int(pair["waiting_edge"]), TrafficSignals.Light.GREEN, 4.0
+	)
+	_check(green_clock >= 0.0, "the cross arm has a green to have just been given")
+	if green_clock < 0.0:
+		main.queue_free()
+		await physics_frame
+		return
+	signals.clock = green_clock
+
+	var car: TrafficCar = traffic.spawn_car_on(
+		int(pair["waiting_lane"]), float(pair["waiting_length"]) - 200.0
+	)
+	car.speed = 0.0
+
+	# The engine at the far end of its own approach, flat out, siren on: it
+	# arrives about four and a half seconds later, which is just past the end of
+	# the preempt sequence.
+	truck.global_position = _point_on_lane(lanes, int(pair["engine_lane"]), 0.0)
+	truck.rotation = Vector2(lanes.lanes[int(pair["engine_lane"])]["heading"]).angle()
+	truck.velocity = Vector2.ZERO
+	truck.set_siren_active(true)
+
+	var contacts: Array[int] = [0]
+	truck.struck_a_vehicle.connect(
+		func(_c: Node, _s: float, _q: float) -> void: contacts[0] += 1
+	)
+
+	var junction_at: Vector2 = lanes.junctions[int(pair["node"])]["position"]
+	var moved: bool = false
+	var nearest: float = INF
+	for _second in range(10):
+		await _drive_engine_at(main, junction_at, PHYSICS_FPS)
+		if car.speed > 10.0:
+			moved = true
+		nearest = minf(nearest, car.global_position.distance_to(truck.global_position))
+
+	_check(moved, "the cross car did set off on its green rather than never moving")
+	_check(
+		contacts[0] == 0,
+		"and the engine arriving after the preempt delay never touches it (%d contact(s))"
+			% contacts[0]
+	)
+	_check(
+		truck.condition >= truck.max_condition,
+		"so the engine is undamaged (condition %.1f, closest approach %.0f units)"
+			% [truck.condition, nearest]
+	)
+
+	main.queue_free()
+	await physics_frame
+
+
+## Two signalled arms on different phases, long enough to run this suite's
+## scenarios on: one for the car to wait on and one for the engine to arrive
+## down. Returns {node, waiting_lane, waiting_edge, waiting_length, engine_lane}.
+func _crossing_arms(lanes: LaneGraph, _signals: TrafficSignals, min_length: float) -> Dictionary:
+	for node in lanes.junction_nodes_with(LaneGraph.JunctionControl.SIGNAL):
+		var junction: Dictionary = lanes.junctions[node]
+		var phases: Array[int] = TrafficSignals.phase_of_each_arm(junction["arms"])
+		for a in range(junction["arms"].size()):
+			for b in range(junction["arms"].size()):
+				if phases[a] == phases[b]:
+					continue
+				var lane_a: int = _lane_arriving(lanes, int(node), int(junction["arms"][a]["edge_index"]))
+				var lane_b: int = _lane_arriving(lanes, int(node), int(junction["arms"][b]["edge_index"]))
+				if lane_a < 0 or lane_b < 0:
+					continue
+				if float(lanes.lanes[lane_a]["length"]) < min_length:
+					continue
+				if float(lanes.lanes[lane_b]["length"]) < min_length:
+					continue
+				return {
+					"node": int(node),
+					"waiting_lane": lane_a,
+					"waiting_edge": int(junction["arms"][a]["edge_index"]),
+					"waiting_length": float(lanes.lanes[lane_a]["length"]),
+					"engine_lane": lane_b,
+				}
+	return {}
+
+
+func _lane_arriving(lanes: LaneGraph, node: int, edge_index: int) -> int:
+	for index in range(lanes.lanes.size()):
+		var lane: Dictionary = lanes.lanes[index]
+		if int(lane["to_node"]) == node and int(lane["edge_index"]) == edge_index:
+			return index
+	return -1
+
+
+## The siren is the tool, and without it most drivers do not care. The same car,
+## in the same place, twice: once with an ordinary driver and once with one of
+## the courteous ones, which is about one driver in five.
+##
+## Run at a red light, so the car is standing still and the engine sitting close
+## behind it stays close behind it. On an open road the car simply drives away
+## from a silent engine and the question never gets asked.
+func _check_the_siren_is_what_makes_a_car_pull_over() -> void:
+	for courteous in [false, true]:
+		var world: Array = await _make_traffic_world(WINDSOR_MAP)
+		var main: Node = world[0]
+		var truck: TruckController = world[1]
+		var traffic: TrafficSystem = world[2]
+		var signals: TrafficSignals = world[3]
+		var lanes: LaneGraph = world[4]
+
+		var lane_index: int = _lane_into_a_signal(lanes, 700.0)
+		if lane_index < 0:
+			lane_index = 0
+		var lane: Dictionary = lanes.lanes[lane_index]
+		var length: float = float(lane["length"])
+		var red_clock: float = _clock_showing(
+			signals, int(lane["to_node"]), int(lane["edge_index"]),
+			TrafficSignals.Light.RED, 8.0
+		)
+		if red_clock >= 0.0:
+			signals.clock = red_clock
+
+		var car: TrafficCar = traffic.spawn_car_on(lane_index, length - 120.0)
+		# Set rather than seeded, so this check is about the RULE and not about
+		# which driver a seed happened to produce. Which drivers are courteous is
+		# the seed's business and is not what is being asked here.
+		car.courteous = courteous
+		car.flaw = TrafficCar.Flaw.NONE
+		car.speed = 0.0
+
+		truck.global_position = _point_on_lane(lanes, lane_index, length - 260.0)
+		truck.rotation = Vector2(lane["heading"]).angle()
+		truck.velocity = Vector2.ZERO
+		truck.set_siren_active(false)
+
+		await _step_traffic(main, 5 * PHYSICS_FPS, red_clock)
+
+		if courteous:
+			_check(
+				car.lateral > traffic.balance.traffic_yield_offset * 0.5,
+				"with the siren off, a courteous driver still pulls over for a close"
+					+ " engine (%.1f units)" % car.lateral
+			)
+		else:
+			_check(
+				car.lateral < 1.0 and car.yield_state == TrafficCar.Yield.NONE,
+				"with the siren off, an ordinary driver does not yield at all"
+					+ " (%.1f units)" % car.lateral
+			)
+
+		main.queue_free()
+		await physics_frame
+
+
+## What hitting a car is worth. Square into the flank of a stopped one: one
+## charge, and the engine stops. Along its side at a graze: it keeps going.
+func _check_hitting_a_car_square_stops_the_engine_and_a_graze_does_not() -> void:
+	for square in [true, false]:
+		var world: Array = await _make_traffic_world(WINDSOR_MAP)
+		var main: Node = world[0]
+		var truck: TruckController = world[1]
+		var traffic: TrafficSystem = world[2]
+		var lanes: LaneGraph = world[4]
+
+		var lane_index: int = _lane_into_a_signal(lanes, 900.0)
+		if lane_index < 0:
+			lane_index = 0
+		var lane: Dictionary = lanes.lanes[lane_index]
+		var heading: Vector2 = Vector2(lane["heading"])
+		var sideways: Vector2 = LaneGraph.right_of(heading)
+
+		# A car standing still in the road, already struck so it stays put and
+		# nothing it decides can move it out of the way mid-check.
+		var car: TrafficCar = traffic.spawn_car_on(lane_index, 600.0)
+		car.struck = true
+		car.speed = 0.0
+		await physics_frame
+
+		var damage_events: Array[int] = [0]
+		truck.truck_damaged.connect(
+			func(_a: float, _s: float) -> void: damage_events[0] += 1
+		)
+
+		if square:
+			# Straight into its flank from the far side of the road. 200 units
+			# of run-up rather than a longer one, because 200 is all the road
+			# there is across: at 220 units/second/second the engine is doing
+			# 250 by then anyway, and starting further out would start it inside
+			# somebody's front room.
+			truck.global_position = car.global_position - sideways * 200.0
+			truck.rotation = sideways.angle()
+			truck.velocity = Vector2.ZERO
+		else:
+			# Alongside it and overlapping by seven units, on the same heading
+			# and already at speed. The contact normal is ACROSS the engine's
+			# travel, so the hit is not square at all and the rule should scrub
+			# almost nothing.
+			#
+			# Started beside the car rather than driven at it from behind, and
+			# that is not a shortcut: a run-up on any converging line ends with
+			# the engine's front face against the car's back one, which is a
+			# square hit and is correctly priced as one. A glancing blow is what
+			# it says it is, a flank brushing a flank, and the only way to
+			# arrange one is to be alongside.
+			truck.global_position = (
+				car.global_position + sideways * (TrafficCar.WIDTH * 0.5 + 20.0 - 7.5)
+			)
+			truck.rotation = heading.angle()
+			truck.velocity = heading * truck.balance.forward_max_speed
+		truck.set_siren_active(false)
+
+		var contacts: Array[float] = []
+		truck.struck_a_vehicle.connect(
+			func(_c: Node, _s: float, q: float) -> void: contacts.append(q)
+		)
+
+		await _step_traffic(main, 5 * PHYSICS_FPS, -1.0, 1.0)
+
+		var speed: float = absf(truck.get_forward_speed())
+		if square:
+			_check(
+				contacts.size() >= 1 and contacts[0] > 0.8,
+				"a T-bone reads as a square hit (squareness %s)"
+					% ("none" if contacts.is_empty() else "%.2f" % contacts[0])
+			)
+			_check(
+				damage_events[0] == 1,
+				"a square hit on a car costs condition exactly once (%d event(s))"
+					% damage_events[0]
+			)
+			_check(
+				truck.condition < truck.max_condition,
+				"and it did cost something (condition %.1f)" % truck.condition
+			)
+			_check(
+				speed < 40.0,
+				"and a T-bone is very nearly a dead stop (%.1f units/s)" % speed
+			)
+		else:
+			_check(
+				contacts.size() == 1 and contacts[0] < 0.3,
+				"a graze along a car reads as a glancing blow (%d contact(s), squareness %s)"
+					% [contacts.size(), "none" if contacts.is_empty() else "%.2f" % contacts[0]]
+			)
+			_check(
+				speed > 140.0,
+				"and scrubs a little speed and no more (%.1f units/s)" % speed
+			)
+			_check(
+				truck.condition >= truck.max_condition,
+				"and costs no condition at all (%.1f)" % truck.condition
+			)
+
+		main.queue_free()
+		await physics_frame
+
+
+## The whole shift, with the density rule left switched on, on the map that has
+## the most road. Traffic must not change what a shift pays or stop one being
+## finished; it must also actually be there, or this check is measuring an empty
+## street.
+func _check_a_windsor_shift_pays_out_with_traffic_on_the_road() -> void:
+	var world: Array = await _make_world(WINDSOR_MAP)
+	var main: Node = world[0]
+	var truck: Node = world[1]
+	var traffic: TrafficSystem = main.get_node("Traffic")
+	var session: Node = main._session
+
+	main._on_start_shift_pressed()
+	await physics_frame
+	truck.set_siren_active(true)
+
+	var most_cars: int = 0
+	for _second in range(3):
+		await _step_traffic(main, PHYSICS_FPS)
+		most_cars = maxi(most_cars, traffic.car_count())
+
+	_check(
+		most_cars > 0,
+		"the density rule puts real traffic on the Windsor streets (%d cars)" % most_cars
+	)
+	_check(
+		most_cars <= traffic.balance.traffic_max_vehicles,
+		"and never more than the cap of %d (%d)" % [
+			traffic.balance.traffic_max_vehicles, most_cars
+		]
+	)
+
+	var expected: int = (
+		session.balance.credits_per_call * session.balance.calls_per_shift
+		+ session.balance.shift_completion_bonus
+	)
+	for _call in range(session.balance.calls_per_shift):
+		var incident: Node = main._dispatch.active_incident
+		if incident == null:
+			break
+		incident.apply_suppression(incident.max_health * 2.0)
+		main._dispatch._confirmation_remaining = 0.0
+		main._dispatch._dispatch_next()
+		await physics_frame
+
+	_check(
+		session.credits_earned_this_shift == expected,
+		"a whole Windsor shift still pays exactly %d credits with traffic on it (%d)"
+			% [expected, session.credits_earned_this_shift]
 	)
 
 	main.queue_free()

@@ -99,6 +99,7 @@ cycle_minimap_zoom={
 2d_physics/layer_3="fire_target"
 2d_physics/layer_4="hydrant"
 2d_physics/layer_5="world_lot"
+2d_physics/layer_6="vehicle"
 
 [rendering]
 
