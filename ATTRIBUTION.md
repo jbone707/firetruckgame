@@ -114,6 +114,29 @@ Stated plainly so the position is on the record, not to settle it:
   `tests/test_session_and_save.gd`, so rewording either one fails the suite rather than
   quietly changing what the game claims.
 
+  The accuracy note the Data and Credits screen prints used to end "Every feature carries
+  its own source field". That sentence is true and is the reason the rest of the note can
+  be trusted, but it is a sentence about a data schema shown to somebody who came to drive
+  a fire truck, so it was cut from the player-facing copy and kept here, where the people
+  it is for will read it. What the screen prints now:
+
+      Not an accurate map of Windsor. Streets and building footprints are from
+      OpenStreetMap; hydrants, some lots and all colours are synthetic.
+
+- **Some real footprints are drawn smaller than they were surveyed**, and say so in the
+  data. The roads on this map are drawn at fixed world-unit widths rather than at their
+  real widths, because road width is what the game was tuned around (`DESIGN.md` states
+  that rule). A road drawn wider than it is reaches into ground the survey says is a
+  garden, so a footprint standing there is shrunk about its own centre until it clears the
+  pavement and is tagged `adjusted_for_road: true`; one that cannot clear it at half its
+  size is dropped rather than drawn as something it is not. On the committed import, one
+  footprint was set back and one was dropped, out of 237 kept.
+- **Road names are printed only where OpenStreetMap gives one.** A way with no `name` tag
+  gets no label, and a slip road (`highway=*_link`) gets none either, because it carries
+  the name of the road it joins. An earlier build labelled these from the highway class
+  instead, which put "Unnamed secondary link" across a slip road as though that were the
+  name of a street.
+
 ## Overpass API usage
 
 The Overpass API usage policy asks that public instances be used lightly: roughly 10,000

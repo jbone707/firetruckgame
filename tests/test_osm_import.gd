@@ -186,3 +186,74 @@ static func _is_on_boundary(point: Vector2, bounds: Rect2) -> bool:
 		or absf(point.y - bounds.position.y) <= BOUNDARY_SLACK
 		or absf(point.y - (bounds.position.y + bounds.size.y)) <= BOUNDARY_SLACK
 	)
+
+
+## The two halves of "the roads are exaggerated and the land is not"
+## (Milestone 6 Part 2), asserted separately so a change to either one is a
+## deliberate edit and not a drift.
+##
+## The land scale is 14 units per metre, chosen by measuring Windsor's houses
+## and block lengths against Elm Grove's and the truck's own length; the numbers
+## are in DEVELOPMENT_STATUS.md and can be taken again with
+## tools/measure_scale.gd. A residential street is 280 units wide whatever the
+## land scale is, which is Elm Grove's own road width, because that is the
+## number the truck was tuned against and the one James said was right.
+func test_the_land_is_drawn_at_the_chosen_scale_and_the_roads_are_not() -> void:
+	var map: MapDefinition = _load_map()
+	if map == null:
+		assert_true(false, "windsor_shadetree.tres must load as a MapDefinition")
+		return
+
+	assert_almost_eq(
+		float(map.geographic_bounds.get("units_per_metre", 0.0)), 14.0, 0.001,
+		"the land is projected at 14 world units per metre"
+	)
+	assert_almost_eq(
+		map.world_bounds.size.x, 7000.0, 1.0, "which makes the world 7,000 units across"
+	)
+	assert_almost_eq(
+		map.world_bounds.size.y, 5320.0, 1.0, "and 5,320 down"
+	)
+
+	var residential: Array[float] = []
+	for road in map.roads:
+		if String(road.get("highway", "")) == "residential":
+			residential.append(float(road.get("width", 0.0)))
+	assert_true(residential.size() > 0, "the map has residential streets to measure")
+	for width in residential:
+		assert_almost_eq(
+			width, 280.0, 0.001,
+			"every residential street is Elm Grove's 280 units wide, not 14 x 11 metres"
+		)
+
+
+## A footprint that had to be moved off the pavement says so in the data.
+##
+## The roads are wider against the land than the survey says, so a few real
+## footprints now stand where the pavement is drawn. Those are shrunk about
+## their own centre until they clear it, which makes them no longer the shape
+## OpenStreetMap recorded, and a flag on the feature is the only thing that
+## keeps that distinguishable afterwards.
+func test_every_real_building_says_whether_it_was_moved_off_the_road() -> void:
+	var map: MapDefinition = _load_map()
+	if map == null:
+		assert_true(false, "windsor_shadetree.tres must load as a MapDefinition")
+		return
+
+	var adjusted: int = 0
+	for building in map.buildings:
+		if String(building.get("source", "")) != "osm":
+			continue
+		assert_true(
+			building.has("adjusted_for_road"),
+			"real building %s records whether it was set back off a road" % building["id"]
+		)
+		if bool(building.get("adjusted_for_road", false)):
+			adjusted += 1
+
+	# Named rather than merely counted: this is a small number today and a large
+	# one would mean the road widths and the land scale had drifted apart.
+	assert_true(
+		adjusted <= 10,
+		"at most ten real footprints were set back off a road (%d were)" % adjusted
+	)

@@ -40,40 +40,69 @@ const MAX_LON: float = -122.7925148
 
 ## World units per real metre, and the whole reason for the number.
 ##
-## The fictional neighbourhood's roads are 280 units kerb to kerb, and the
-## truck's speed, turning circle, stream range, hydrant radius and camera zoom
-## were all tuned against that width. A residential street in this part of
-## Windsor is a standard American 36 foot kerb to kerb, which is 11.0 metres.
-## 25 units per metre draws it at 275 units: near enough to 280 that nothing
-## tuned against the fictional map has to move, and a round number to reason
-## about afterwards.
+## Milestone 5 set this at 25, chosen so that a real 11.0 metre residential
+## street came out 275 units wide against the fictional map's 280, and every
+## other distance followed from it. James played the result and said the scale
+## felt off: the roads were the width he liked, but the truck read as a toy and
+## every straight was long. Measuring it says the same thing (tools/
+## measure_scale.gd, all in truck lengths):
 ##
-## The consequence, which is real and is reported rather than hidden: American
-## residential blocks are 100 to 150 metres on a side against the fictional
-## map's 33, so the same road width buys a much larger world. See
-## DEVELOPMENT_STATUS.md for the resulting size and drive times.
-const UNITS_PER_METRE: float = 25.0
+##                      road width   house width   junction spacing
+##     Elm Grove              3.11          2.63               9.22
+##     Windsor at 25          3.06          3.76              19.52
+##
+## The road was matched and everything else was not. Real houses are half again
+## bigger than Elm Grove's against the same truck and real blocks are more than
+## twice as long, which is what makes a straight feel long and the truck feel
+## small on it.
+##
+## So the land is drawn smaller and the ROADS ARE NOT (see
+## WIDTH_UNITS_BY_CLASS). 14 units per metre is where the two ratios that were
+## wrong come closest to Elm Grove's together: houses land at 0.80 of Elm
+## Grove's ratio and junction spacing at 1.19, against 1.43 and 2.12 before.
+## Anything smaller shrinks the houses further to bring the blocks in, and
+## anything larger leaves the blocks long. The world goes from 12,499 by 9,500
+## units to 7,000 by 5,320.
+##
+## What this deliberately breaks: a metre of Windsor and a metre of its roads
+## are no longer the same length. The roads are exaggerated, the land is real.
+## That is the rule, and DESIGN.md states it.
+const UNITS_PER_METRE: float = 14.0
 
-## Kerb to kerb width in metres by highway class, used when the way carries no
-## width or lanes tag. Not one road in this extract carries either, so in
-## practice this table sets every width on the map.
+## World units per metre of ROAD WIDTH, which is Milestone 5's 25 and does not
+## move with the land. Only reached by a way that carries its own width or lane
+## count; no way in this extract carries either, so in practice
+## WIDTH_UNITS_BY_CLASS sets every width on the map.
+const ROAD_UNITS_PER_METRE: float = 25.0
+
+## Kerb to kerb width in WORLD UNITS by highway class, used when the way
+## carries no width or lanes tag. Not one road in this extract carries either,
+## so in practice this table sets every width on the map.
 ##
-## Residential is the anchor (see UNITS_PER_METRE). The rest are ordinary
-## American cross sections for their class: two lanes plus parking for
-## residential and unclassified, two lanes plus turn allowance for tertiary,
-## four lanes for secondary, a single ramp lane with shoulders for a link, and
-## a shared surface for living_street and service.
-const WIDTH_METRES_BY_CLASS: Dictionary = {
-	"primary": 16.0,
-	"primary_link": 8.0,
-	"secondary": 14.5,
-	"secondary_link": 8.5,
-	"tertiary": 12.5,
-	"tertiary_link": 8.0,
-	"unclassified": 11.0,
-	"residential": 11.0,
-	"living_street": 9.0,
-	"service": 7.0,
+## In units rather than metres because the roads are the one thing on this map
+## that must not move when the land is drawn smaller (Milestone 6 Part 2). Road
+## width is what the truck's speed, turning circle, stream range, hydrant radius
+## and camera zoom were tuned against, and it is the number James said was
+## right. Every value here is the width Milestone 5 drew at 25 units per metre,
+## rounded, except residential, which is nudged from 275 onto Elm Grove's own
+## 280 so the street the truck spends its shift on is the same street on both
+## maps.
+##
+## The ordinary American cross sections they came from: two lanes plus parking
+## for residential and unclassified, two lanes plus a turn allowance for
+## tertiary, four lanes for secondary, a single ramp lane with shoulders for a
+## link, and a shared surface for living_street and service.
+const WIDTH_UNITS_BY_CLASS: Dictionary = {
+	"primary": 400.0,
+	"primary_link": 200.0,
+	"secondary": 363.0,
+	"secondary_link": 213.0,
+	"tertiary": 313.0,
+	"tertiary_link": 200.0,
+	"unclassified": 275.0,
+	"residential": 280.0,
+	"living_street": 225.0,
+	"service": 175.0,
 }
 
 ## Classes an engine can drive, before the extra test applied to service ways.
@@ -91,8 +120,16 @@ const NON_THROUGH_SERVICE: Array = ["driveway", "parking_aisle", "drive-through"
 const LANE_WIDTH_METRES: float = 3.5
 const SHOULDER_METRES: float = 2.0
 
-## Fallback width in metres for a drivable class missing from the table above.
-const DEFAULT_WIDTH_METRES: float = 11.0
+## Fallback width in world units for a drivable class missing from the table
+## above.
+const DEFAULT_WIDTH_UNITS: float = 280.0
+
+## How far a footprint may be shrunk about its centre to clear a road slab,
+## and the step it is tried at. Half is the floor: a house drawn at less than
+## half its surveyed size is not that house any more, and dropping it says so
+## honestly where drawing a hut would not.
+const MIN_ADJUST_SCALE: float = 0.5
+const ADJUST_STEP: float = 0.02
 
 ## How far past the kerb an incident marker and a hydrant stand, world units.
 ## Matched to the fictional map, where the marker is on the sidewalk and the
@@ -307,10 +344,15 @@ func _import(elements: Array) -> MapDefinition:
 		"source_file": SOURCE_PATH,
 		"query_file": "res://data/source/windsor_shadetree_smoketree.overpassql",
 		"importer": "res://tools/import_osm.gd",
+		# Player-facing copy: it is printed on the Data and Credits screen word
+		# for word. It used to end "Every feature carries its own source field",
+		# which is true, is the reason the rest can be trusted, and means nothing
+		# to somebody who came to drive a fire truck. It is kept in
+		# ATTRIBUTION.md, where the people it is for will read it.
 		"accuracy_note": (
 			"Not an accurate map of Windsor. Streets and building footprints are"
 			+ " from OpenStreetMap; hydrants, some lots and all colours are"
-			+ " synthetic. Every feature carries its own source field."
+			+ " synthetic."
 		),
 	}
 
@@ -416,9 +458,19 @@ func _split_way(way: Dictionary, node_uses: Dictionary) -> Array[Dictionary]:
 
 	var tags: Dictionary = way["tags"]
 	var way_id: int = int(way.get("id", 0))
+	# A way with no name tag keeps no name, and MapBuilder draws no label for it
+	# (Milestone 6 Part 3). It used to be given one made out of its highway
+	# class, which put "Unnamed secondary link" across a slip road on the map
+	# James was playing. A street sign is the name of a street; there is no
+	# street here called that, and an honest map says nothing rather than
+	# something invented.
+	#
+	# A link is never labelled even when the data names it. A slip road carries
+	# the name of the road it joins, so labelling it prints that road's name a
+	# second time in a place it does not belong.
 	var road_name: String = String(tags.get("name", ""))
-	if road_name == "":
-		road_name = "Unnamed %s" % String(tags["highway"]).replace("_", " ")
+	if String(tags.get("highway", "")).ends_with("_link"):
+		road_name = ""
 	var width: float = _road_width_units(tags)
 
 	# Clip first, so a way that leaves the box comes back as one or more runs
@@ -551,17 +603,22 @@ func _clip_segment(a: Vector2, b: Vector2) -> Variant:
 
 ## Kerb to kerb width in world units: the way's own width tag if it has one,
 ## else its lane count, else the class table.
+##
+## A tagged width is a real measurement and so is converted at
+## ROAD_UNITS_PER_METRE, the road exaggeration, never at UNITS_PER_METRE, the
+## land scale. Using the land scale here would draw a street tagged 11 metres
+## at 154 units and one merely CLASSED residential at 280, side by side.
 func _road_width_units(tags: Dictionary) -> float:
 	if tags.has("width"):
 		var metres: float = _parse_width_metres(String(tags["width"]))
 		if metres > 0.0:
-			return _units(metres)
+			return metres * ROAD_UNITS_PER_METRE
 	if tags.has("lanes"):
 		var lanes: float = String(tags["lanes"]).to_float()
 		if lanes >= 1.0:
-			return _units(lanes * LANE_WIDTH_METRES + SHOULDER_METRES)
+			return (lanes * LANE_WIDTH_METRES + SHOULDER_METRES) * ROAD_UNITS_PER_METRE
 	var highway_class: String = String(tags.get("highway", ""))
-	return _units(float(WIDTH_METRES_BY_CLASS.get(highway_class, DEFAULT_WIDTH_METRES)))
+	return float(WIDTH_UNITS_BY_CLASS.get(highway_class, DEFAULT_WIDTH_UNITS))
 
 
 ## OSM width values are metres unless they name a unit. Only feet are handled,
@@ -702,6 +759,7 @@ func _import_buildings(
 	var buildings: Array[Dictionary] = []
 	var clipped_out: int = 0
 	var on_road: int = 0
+	var adjusted_count: int = 0
 
 	for way in ways:
 		var tags: Dictionary = way.get("tags", {})
@@ -723,14 +781,30 @@ func _import_buildings(
 			clipped_out += 1
 			continue
 
-		# A real footprint that overlaps a road slab is a disagreement between
-		# the real footprint and this importer's invented road width, and the
-		# invented number is the one that must give way rather than the data.
-		# Dropping the building is the honest resolution: narrowing the road to
-		# fit would silently make a street the truck cannot turn in.
+		# A real footprint that overlaps a road slab is a disagreement between the
+		# real footprint and this importer's invented road width, and the invented
+		# number is the one that must give way rather than the data. Narrowing the
+		# road to fit is not on offer: it would silently make a street the truck
+		# cannot turn in.
+		#
+		# Milestone 5 dropped the building. That was tolerable while the roads were
+		# real widths and only a handful of footprints touched them, and it is not
+		# now: the roads are exaggerated against a smaller world, so a road reaches
+		# further into the land than the survey says and takes whole terraces with
+		# it. So the house is set back instead, shrunk about its own centre until
+		# it clears the pavement, and marked adjusted_for_road so that nothing
+		# downstream can mistake it for a footprint as surveyed. One that cannot
+		# clear the road at MIN_ADJUST_SCALE of itself is not that house any more
+		# and is still dropped.
+		var adjusted: bool = false
 		if _overlaps_any_road(polygon, definition, graph):
-			on_road += 1
-			continue
+			var inset: PackedVector2Array = _inset_clear_of_roads(polygon, definition, graph)
+			if inset.is_empty():
+				on_road += 1
+				continue
+			polygon = inset
+			adjusted = true
+			adjusted_count += 1
 
 		var osm_id: int = int(way.get("id", 0))
 		buildings.append({
@@ -740,10 +814,11 @@ func _import_buildings(
 			"roof_color": _roof_color(osm_id),
 			"source": "osm",
 			"osm_id": "way/%d" % osm_id,
+			"adjusted_for_road": adjusted,
 		})
 
-	_note("buildings: %d imported, %d dropped for crossing the box edge, %d dropped for overlapping a road slab" % [
-		buildings.size(), clipped_out, on_road
+	_note("buildings: %d imported, %d set back off a road slab, %d dropped for crossing the box edge, %d dropped for overlapping a road slab" % [
+		buildings.size(), adjusted_count, clipped_out, on_road
 	])
 
 	var synthetic: Array[Dictionary] = _synthesize_lots(definition, buildings, graph)
@@ -761,6 +836,31 @@ func _way_polygon(way: Dictionary) -> PackedVector2Array:
 	if polygon.size() >= 2 and polygon[0].distance_to(polygon[polygon.size() - 1]) < 0.01:
 		polygon.remove_at(polygon.size() - 1)
 	return polygon
+
+
+## The footprint shrunk about its own centre until it clears every road slab,
+## or an empty polygon when it cannot at MIN_ADJUST_SCALE of itself.
+##
+## Shrinking rather than clipping, because a clipped footprint has a straight
+## edge lying exactly along the kerb, which draws a terrace of houses with their
+## front walls flush to the road. A house set back reads as a house set back.
+##
+## Stepped rather than solved: the overlap test is a polygon intersection
+## against every road segment, the answer only has to be a scale that clears,
+## and ADJUST_STEP of a footprint is a few units.
+func _inset_clear_of_roads(
+	polygon: PackedVector2Array, definition: MapDefinition, graph: RoadGraph
+) -> PackedVector2Array:
+	var centroid: Vector2 = _centroid(polygon)
+	var scale: float = 1.0 - ADJUST_STEP
+	while scale >= MIN_ADJUST_SCALE:
+		var shrunk := PackedVector2Array()
+		for point in polygon:
+			shrunk.append(centroid + (point - centroid) * scale)
+		if not _overlaps_any_road(shrunk, definition, graph):
+			return shrunk
+		scale -= ADJUST_STEP
+	return PackedVector2Array()
 
 
 ## True when any part of the polygon lies on the pavement of any road.
@@ -842,7 +942,26 @@ func _synthesize_lots(
 					a, direction, side, half_width + setback, depth,
 					run_start, length, max_length, lots.size()
 				))
-	return lots
+
+	# A lot is laid out against ONE road, at a setback measured off that road's
+	# kerb, and nothing in that says it clears the next road along. It always did
+	# while the roads were real widths; once they are exaggerated against a
+	# smaller world (Milestone 6 Part 2) two of them ran across a neighbouring
+	# street, which the validator caught. A synthetic lot is invented ground and
+	# costs nothing to give up, so any that lands on pavement is dropped rather
+	# than moved: moving it would put a lot somewhere no frontage was measured.
+	# Ids keep the numbers they were given, so a dropped lot leaves a gap rather
+	# than renaming its neighbours.
+	var clear: Array[Dictionary] = []
+	for lot in lots:
+		if _overlaps_any_road(lot["polygon"], definition, graph):
+			continue
+		clear.append(lot)
+	if clear.size() < lots.size():
+		_note("buildings: %d synthetic lot(s) dropped for landing on a road" % [
+			lots.size() - clear.size(),
+		])
+	return clear
 
 
 func _lots_along(
@@ -1152,8 +1271,12 @@ func _report(definition: MapDefinition, graph: RoadGraph) -> void:
 			real_hydrants += 1
 
 	var names: Array[String] = []
+	var unnamed: int = 0
 	for road in definition.roads:
 		var road_name: String = String(road["name"])
+		if road_name == "":
+			unnamed += 1
+			continue
 		if not names.has(road_name):
 			names.append(road_name)
 	names.sort()
@@ -1172,6 +1295,7 @@ func _report(definition: MapDefinition, graph: RoadGraph) -> void:
 		graph.junction_nodes().size(), graph.dead_end_nodes().size(), total_length,
 	])
 	_note("streets: %s" % ", ".join(names))
+	_note("streets: %d segment(s) carry no name and are drawn without a label" % unnamed)
 	_note("buildings: %d total, %d real, %d synthetic" % [
 		definition.buildings.size(), real_buildings, definition.buildings.size() - real_buildings,
 	])

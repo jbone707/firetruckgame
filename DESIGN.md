@@ -114,12 +114,42 @@ reads as a street rather than as a line drawn on a field.
 ### Windsor test area, imported from OpenStreetMap
 
 The second map is built from OpenStreetMap data for a 500 by 380 metre box
-around Shadetree Drive and Smoketree Street in Windsor, California: 12,499 by
-9,500 units at 25 units per metre, 42 road segments with their real names, 19
-junctions, 19 dead ends and 238 real building footprints.
+around Shadetree Drive and Smoketree Street in Windsor, California: 7,000 by
+5,320 units at 14 units per metre, 42 road segments with their real names, 19
+junctions, 19 dead ends and 237 real building footprints.
+
+**The roads are exaggerated and the land is not. That is the rule.** A road's
+drawn width comes from a table in world units, not from its real width in
+metres: a residential street is 280 units wide on this map because that is what
+it is on Elm Grove, which is the width the truck's speed, turning circle,
+stream range, hydrant radius and camera zoom were all tuned against. Everything
+else on the map is the real place at 14 units per metre. So a metre of Windsor
+and a metre of its roads are deliberately not the same length, and a street is
+about twice as wide against its houses as it is in life.
+
+The alternative was tried first and played wrong. Milestone 5 projected
+everything at one scale, 25 units per metre, chosen to make a real residential
+street come out at the width Elm Grove used. The roads were right and nothing
+else was: measured in truck lengths, Windsor's houses came out half again
+bigger than Elm Grove's and its blocks more than twice as long, so the truck
+read as a toy and every straight felt long. The three ratios, in truck lengths
+(`tools/measure_scale.gd` takes them again):
+
+| | road width | house width | junction spacing |
+|---|---|---|---|
+| Elm Grove | 3.11 | 2.63 | 9.22 |
+| Windsor at 25 units/metre | 3.06 | 3.76 | 19.52 |
+| Windsor at 14, roads pinned | 3.11 | 2.11 | 10.93 |
+
+One real consequence, handled rather than hidden: a road drawn wider than it is
+reaches into ground the survey says is a garden, and a few real footprints
+stand there. Those are shrunk about their own centre until they clear the
+pavement and carry `adjusted_for_road: true` in the data; one that cannot clear
+it at half its size is dropped instead of drawn as a hut. On today's import one
+footprint was set back and one was dropped.
 
 **It is not an accurate map of Windsor and is never presented as one.** The
-streets and the building outlines are real; 17 lots, all 12 hydrants and every
+streets and the building outlines are real; 18 lots, all 12 hydrants and every
 colour are invented, because the source data does not contain them. Every
 feature in the resource carries a `source` of `osm` or `synthetic` so the two
 can never be confused, and the map select screen says both things before the
@@ -153,12 +183,24 @@ meeting at 30 degrees are drawn by the same code that draws a grid, and the
 fictional map's fence comes out at exactly the coordinate its hand-built
 rectangles used to specify, which is how the rewrite was checked.
 
-That works because the road network reaches the edge of the map, so each cut
-divides the land rather than punching a hole in it. `MapValidator` checks
-exactly that, along with connectivity from the spawn, every hydrant and incident
-candidate standing at a reachable kerb, a minimum road width, roads only
-overlapping at junctions, and no building on the pavement. Both maps pass all
-six rules.
+A cut that encloses part of what is left would hand back a hole, and Godot
+returns a hole as a separate polygon that the next cut would then treat as
+solid ground. Milestone 5 assumed that could not happen, because the road
+network reaches the edge of the map. It does happen, at 10 of Windsor's 189
+cuts, and what came out was eight pieces of "land" lying inside the road: two
+whole road segments and six wedges across the mouths of side streets, each one
+drawn with a kerb line around it, which is why Windsor read as one long road
+with its turnings painted shut. `MapGeometry` now splits a piece in half
+through any enclosure a cut would make and cuts the halves instead, so no hole
+is ever produced.
+
+`MapValidator` still asks every map whether a hole survived, along with
+connectivity from the spawn, every hydrant and incident candidate standing at a
+reachable kerb, a minimum road width, roads only overlapping at junctions, and
+no building on the pavement. Both maps pass all six rules. Two checks in the
+unit suite ask the question the validator cannot: every junction arm on both
+maps is asphalt just inside the kerb, and no piece of either region sits inside
+the road anywhere.
 
 A map's layout is stored as data (`MapDefinition`, saved as a `.tres`)
 separately from the code that draws and simulates it (`MapBuilder`): road

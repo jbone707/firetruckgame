@@ -31,13 +31,24 @@ const WINDSOR_MAP: String = "res://resources/windsor_shadetree.tres"
 const ELM_GROVE_MAP: String = "res://resources/neighbourhood.tres"
 
 ## The turn off Hembree Lane. The run-up is long enough to be at speed by the
-## junction, the run down the side street long enough that the truck is
-## properly into it rather than sitting in its mouth, and the arrival radius is
-## two truck lengths, so a truck that gets there without lining up neatly still
-## counts as having got there.
+## junction; the aiming point is as far down the side street as the side street
+## goes, capped, because Windsor's segments are short and getting shorter as the
+## land scale changes (Milestone 6 Part 2).
+##
+## Arriving is measured against the side street's OWN half width plus a truck
+## length rather than a fixed distance: the question is whether the truck got
+## onto the side street, and a truck a truck's length off the centreline of a
+## street it is driving down has got onto it. A fixed number in world units
+## would mean something different on each map and would have to be retuned
+## every time the land scale moved.
 const APPROACH_RUN_UP: float = 700.0
 const SIDE_STREET_RUN: float = 900.0
-const ARRIVAL_RADIUS: float = 180.0
+const ARRIVAL_MARGIN: float = 90.0
+
+## How close to the junction the throttle comes off, and how far off. See the
+## drive loop for why.
+const TURN_IN_DISTANCE: float = 420.0
+const TURNING_THROTTLE: float = 0.45
 
 ## Where a world built by this runner writes its save, so the suite never
 ## touches the player's own.
@@ -821,6 +832,7 @@ func _check_the_truck_turns_off_hembree_lane_into_a_side_street() -> void:
 	var node: Vector2 = junction["node"]
 	var approach: Vector2 = junction["approach"]
 	var target: Vector2 = junction["target"]
+	var arrived_within: float = float(junction["width"]) * 0.5 + ARRIVAL_MARGIN
 
 	var damage_events: Array[float] = []
 	truck.truck_damaged.connect(
@@ -831,30 +843,44 @@ func _check_the_truck_turns_off_hembree_lane_into_a_side_street() -> void:
 	truck.rotation = (node - approach).angle()
 	truck.velocity = Vector2.ZERO
 
-	# Steer at the far point down the side street and hold the throttle down. A
-	# junction drawn shut, or a wedge solid enough to stop the truck, shows up
-	# as a truck that never arrives.
+	# Steer at a point well down the side street and drive at the junction. A
+	# junction drawn shut, or a wedge solid enough to stop the truck, shows up as
+	# a truck that never arrives.
+	#
+	# Full throttle on the run-up and eased to TURNING_THROTTLE inside
+	# TURN_IN_DISTANCE of the junction, which is what a driver does: the truck
+	# tops out at 250 units a second and its turning circle at that speed is
+	# wider than the junction. Still at speed, and still nothing like slow.
 	var closest: float = INF
+	var frames: int = 0
 	for _frame in range(12 * PHYSICS_FPS):
+		frames += 1
 		var error: float = wrapf(
 			(target - truck.global_position).angle() - truck.rotation, -PI, PI
 		)
-		truck.set_drive_intent(1.0, clampf(error * 2.0, -1.0, 1.0), false)
+		var throttle: float = 1.0
+		if truck.global_position.distance_to(node) < TURN_IN_DISTANCE:
+			throttle = TURNING_THROTTLE
+		truck.set_drive_intent(throttle, clampf(error * 2.0, -1.0, 1.0), false)
 		await physics_frame
 		closest = minf(closest, truck.global_position.distance_to(target))
 		# Stopped at the target rather than driven on through it: the question is
 		# whether the junction can be taken, and holding the throttle down past a
 		# point 268 units into a side street only asks what is at the far end of
 		# the side street.
-		if closest <= ARRIVAL_RADIUS:
+		if closest <= arrived_within:
 			break
 
+	# Seconds, not the distance: the run stops on arrival, so the distance
+	# reported would always be just inside the allowance and would say nothing.
+	# The time says how much of the twelve seconds it needed.
 	_check(
-		closest <= ARRIVAL_RADIUS,
-		"the truck drives off Hembree Lane at %s, through the junction and into %s"
-			% [str(approach), junction["name"]]
-			+ " (closest %.0f to a point %.0f down it, allowed %.0f)"
-			% [closest, node.distance_to(target), ARRIVAL_RADIUS]
+		closest <= arrived_within,
+		"the truck drives off Hembree Lane at %s, through the junction and %.0f units"
+			% [str(approach), node.distance_to(target)]
+			+ " onto the %.0f unit road that joins it, in %.1f s of a possible 12.0"
+			% [float(junction["width"]), float(frames) / float(PHYSICS_FPS)]
+			+ " (within %.0f units of its centreline)" % arrived_within
 	)
 	_check(
 		damage_events.is_empty(),
@@ -899,7 +925,7 @@ func _first_side_street_off(
 			"node": graph.positions[node],
 			"approach": _along(graph, node, main_edge, APPROACH_RUN_UP),
 			"target": _along(graph, node, side_edge, SIDE_STREET_RUN),
-			"name": String(map.roads[int(graph.edges[side_edge]["road_index"])].get("name", "")),
+			"width": float(graph.edges[side_edge]["width"]),
 		}
 	return best
 
@@ -908,14 +934,49 @@ func _longer(graph: RoadGraph, edge_index: int, than: int) -> bool:
 	return float(graph.edges[edge_index]["length"]) > float(graph.edges[than]["length"])
 
 
-## A point on one arm's centreline, at most "distance" from the node and never
-## past the arm's far end.
+## A point "distance" along the road that leaves the node on this arm,
+## following the road through its own bends and stopping where the road does.
+##
+## One segment is not enough to aim at. Windsor's ways are split at every
+## shared node, so the arm leaving a junction can be 176 units long, and a
+## point 150 units into a street is still inside the turn: the truck sweeps
+## past it and its closest approach measures the width of the sweep rather than
+## whether it made the turn. Following the road for several segments puts the
+## aiming point somewhere the truck has to have straightened out to reach.
 func _along(graph: RoadGraph, node: int, edge_index: int, distance: float) -> Vector2:
-	var edge: Dictionary = graph.edges[edge_index]
-	var other: int = int(edge["b"]) if int(edge["a"]) == node else int(edge["a"])
-	var here: Vector2 = graph.positions[node]
-	var direction: Vector2 = (graph.positions[other] - here).normalized()
-	return here + direction * minf(distance, float(edge["length"]) * 0.85)
+	var road: int = int(graph.edges[edge_index]["road_index"])
+	var at: int = node
+	var edge: int = edge_index
+	var travelled: float = 0.0
+
+	# Bounded by the number of edges, so a road that somehow loops back on
+	# itself ends the walk rather than running forever.
+	for _step in range(graph.edges.size() + 1):
+		var other: int = int(graph.edges[edge]["b"])
+		if int(graph.edges[edge]["a"]) != at:
+			other = int(graph.edges[edge]["a"])
+		var length: float = float(graph.edges[edge]["length"])
+		if travelled + length >= distance:
+			var into: float = distance - travelled
+			var direction: Vector2 = (graph.positions[other] - graph.positions[at]).normalized()
+			return graph.positions[at] + direction * into
+		travelled += length
+		at = other
+
+		var next: int = -1
+		for candidate in graph.incident_edges.get(at, []):
+			if int(candidate) == edge:
+				continue
+			if int(graph.edges[int(candidate)]["road_index"]) != road:
+				continue
+			next = int(candidate)
+			break
+		if next < 0:
+			# The road ends here, so the far end of it is the furthest point there
+			# is to aim at.
+			return graph.positions[at]
+		edge = next
+	return graph.positions[at]
 
 
 ## Pulling up to a hydrant, three ways, in the real scene against the real map.
